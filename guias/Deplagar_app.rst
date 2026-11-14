@@ -197,3 +197,58 @@ ejecute la prueba de conexión:
 
 *Resultado esperado:* El comando devolverá de inmediato el documento HTML con el mensaje 
 ``Welcome to nginx!``.
+
+
+========================================================================
+Detención Temporal y Reactivación de Proyectos en OpenShift
+========================================================================
+
+Este procedimiento detalla cómo apagar temporalmente una aplicación o proyecto 
+en OpenShift escalando las réplicas a cero sin eliminar los recursos ni la configuración, 
+y cómo volver a encenderla posteriormente.
+
+
+1. Comprobar el Proyecto y Estado Actual
+=======================================
+
+1. Verifique el proyecto activo en el que se encuentra trabajando:
+
+   .. code-block:: bash
+
+      oc project
+
+2. Compruebe el estado actual de los pods y deployments del proyecto:
+
+   .. code-block:: bash
+
+      oc get pods
+      oc get deployment
+      oc get service
+
+
+2. Detener Temporalmente la Aplicación (Escalar a 0)
+====================================================
+
+Para detener la ejecución de su aplicación sin borrar ningún archivo de configuración, 
+servicio o deployment, escale el número de réplicas a cero:
+
+.. code-block:: bash
+
+   oc scale deployment mi-web-demo --replicas=0
+
+*Verificación:* Ejecute ``oc get pods`` y confirme que el pod anterior ha desaparecido 
+o se encuentra completamente terminado. Al listar los recursos con ``oc get all``, 
+notará que la estructura sigue intacta pero con ``0/0`` réplicas disponibles.
+
+
+3. Reactivar la Aplicación
+=========================
+
+Cuando decida encender nuevamente el servicio, simplemente devuelva las réplicas a su valor original:
+
+.. code-block:: bash
+
+   oc scale deployment mi-web-demo --replicas=1
+
+*Verificación:* Tras unos segundos, ejecute ``oc get pods`` para comprobar que el contenedor 
+vuelve a encontrarse en estado ``Running (1/1)``.
