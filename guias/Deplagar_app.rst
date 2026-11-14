@@ -170,20 +170,20 @@ habilite el reenvío del kernel y las reglas de NAT:
 
    .. code-block:: bash
 
-   sudo iptables -t nat -L -n -v
-   Chain PREROUTING (policy ACCEPT 11 packets, 1002 bytes)
-    pkts bytes target     prot opt in     out     source               destination         
+      sudo iptables -t nat -L -n -v
+      Chain PREROUTING (policy ACCEPT 11 packets, 1002 bytes)
+       pkts bytes target     prot opt in     out     source               destination         
        0     0 DNAT       tcp  --  *      *       0.0.0.0/0            192.168.123.40       tcp dpt:30021 to:127.0.0.1:30021
 
-   Chain INPUT (policy ACCEPT 0 packets, 0 bytes)
-    pkts bytes target     prot opt in     out     source               destination         
+      Chain INPUT (policy ACCEPT 0 packets, 0 bytes)
+       pkts bytes target     prot opt in     out     source               destination         
 
-   Chain OUTPUT (policy ACCEPT 122 packets, 10745 bytes)
-    pkts bytes target     prot opt in     out     source               destination         
+      Chain OUTPUT (policy ACCEPT 122 packets, 10745 bytes)
+       pkts bytes target     prot opt in     out     source               destination         
        1    60 DNAT       tcp  --  *      *       0.0.0.0/0            192.168.123.40       tcp dpt:30021 to:127.0.0.1:30021
 
-   Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
-    pkts bytes target     prot opt in     out     source               destination   
+      Chain POSTROUTING (policy ACCEPT 0 packets, 0 bytes)
+      pkts bytes target     prot opt in     out     source               destination   
 
 Paso 6: Validación Final
 ========================
