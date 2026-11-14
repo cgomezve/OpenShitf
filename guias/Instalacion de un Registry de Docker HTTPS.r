@@ -24,7 +24,7 @@ un certificado y una llave privada.
 
    .. code-block:: bash
 
-      sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout /etc/docker/certs.d/192.168.123.121:4443/domain.key -x509 -days 365 -out /etc/docker/certs.d/192.168.123.121:4443/domain.crt -subj "/CN=192.168.123.121"
+      sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout /etc/docker/certs.d/192.168.123.121:4443/domain.key -x509 -days 365 -out /etc/docker/certs.d/192.168.123.121:4443/domain.crt -subj "/CN=10.134.0.89"
 
 *Verificación:* Compruebe que los archivos ``domain.key`` y ``domain.crt`` existan dentro de la ruta creada.
 
@@ -35,7 +35,7 @@ un certificado y una llave privada.
 Utilice la imagen oficial de Docker Registry para levantar el servicio 
 montando el volumen de certificados y configurando un directorio de almacenamiento persistente.
 
-1. Ejecute el contenedor mapeando el puerto ``4443`` y apuntando a los certificados:
+1. Ejecute el contenedor mapeando el puerto ``5000`` y apuntando a los certificados:
 
    .. code-block:: bash
 
@@ -44,10 +44,10 @@ montando el volumen de certificados y configurando un directorio de almacenamien
         --name registry \
         -v /var/lib/registry:/var/lib/registry \
         -v /etc/docker/certs.d/192.168.123.121:4443:/certs \
-        -e REGISTRY_HTTP_ADDR=0.0.0.0:4443 \
+        -e REGISTRY_HTTP_ADDR=0.0.0.0:5000 \
         -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/domain.crt \
         -e REGISTRY_HTTP_TLS_KEY=/certs/domain.key \
-        -p 4443:4443 \
+        -p 5000:5000 \
         registry:2
 
 *Verificación:* Ejecute ``sudo docker ps`` y confirme que el contenedor ``registry`` se encuentra en estado ``Up``.
