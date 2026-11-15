@@ -40,7 +40,6 @@ montando el volumen de certificados y configurando un directorio de almacenamien
    .. code-block:: bash
 
    sudo docker rm -f registry 2>/dev/null || true
-   
    sudo docker run -d \
      --restart=always \
      --name registry \
