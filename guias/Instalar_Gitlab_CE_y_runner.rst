@@ -91,11 +91,13 @@ Para ejecutar los trabajos de CI/CD automatizados:
       curl -L https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.rpm.sh | sudo bash
       sudo dnf install -y gitlab-runner
 
-2. Registre el Runner utilizando el token de su proyecto (obtenido en la sección *Settings > CI/CD > Runners* de su instancia de GitLab):
+2. Registre el Runner utilizando el token de su proyecto (obtenido en la sección *Settings > CI/CD > Runners* de su instancia de GitLab) y pulsar sobre el boton Create instance runner, llena el formulario y el te va dar un comando como este:
 
    .. code-block:: bash
 
       sudo gitlab-runner register --url "http://192.168.123.121/" --registration-token "TU_TOKEN_DE_REGISTRO"
+
+Asi debes hacerlo por tantos runners quieras crear
 
 3. Inicie y verifique el servicio del agente:
 
