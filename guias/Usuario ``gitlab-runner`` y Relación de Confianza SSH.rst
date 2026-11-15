@@ -37,6 +37,27 @@ En el servidor destino (``192.168.123.40``), asignar una contraseña al usuario 
 
    sudo passwd gitlab-runner
 
+1.3. Agregar ``gitlab-runner`` al grupo ``docker`` (Servidor GitLab)
+--------------------------------------------------------------------
+En el servidor donde corre el GitLab Runner (``192.168.123.121``), otorgar permisos de acceso al socket de Docker (``/var/run/docker.sock``) para evitar errores de permisos durante la etapa ``registerDev``:
+
+.. code-block:: bash
+
+   sudo usermod -aG docker gitlab-runner
+
+Reiniciar el servicio de Docker y el GitLab Runner para que el cambio de grupo surta efecto:
+
+.. code-block:: bash
+
+   sudo systemctl restart docker
+   sudo systemctl restart gitlab-runner
+
+*Verificación:* Confirmar que ``docker`` aparezca en la lista de grupos asignados al usuario:
+
+.. code-block:: bash
+
+   groups gitlab-runner
+
 2. Configuración de Relación de Confianza (SSH sin contraseña)
 ==============================================================
 
