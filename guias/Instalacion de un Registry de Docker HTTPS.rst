@@ -146,3 +146,28 @@ Valide el funcionamiento completo del flujo de imágenes ejecutando las siguient
    # 4. Prueba opcional de descarga (Pull) limpiando caché local previa
    sudo docker rmi 192.168.123.150:4443/alpine:latest
    sudo docker pull 192.168.123.150:4443/alpine:latest
+
+6. Consulta de Catálogo y Etiquetas (API v2)
+============================================
+
+Para verificar de forma remota las imágenes y etiquetas (*tags*) almacenadas en el Docker Registry mediante peticiones HTTPS hacia su API v2, ejecute los siguientes comandos:
+
+.. code-block:: bash
+
+   # 1. Listar todos los repositorios disponibles en el Registry
+   curl --cacert /etc/docker/certs.d/192.168.123.150:4443/ca.crt \
+     -X GET https://192.168.123.150:4443/v2/_catalog
+
+   # Salida esperada:
+   # {"repositories":["alpine"]}
+
+   # 2. Listar las etiquetas (tags) de un repositorio específico (ej. alpine)
+   curl --cacert /etc/docker/certs.d/192.168.123.150:4443/ca.crt \
+     -X GET https://192.168.123.150:4443/v2/alpine/tags/list
+
+   # Salida esperada:
+   # {"name":"alpine","tags":["latest"]}
+
+.. note::
+
+   Si realiza la consulta desde una estación de trabajo donde aún no se ha instalado el certificado ``ca.crt``, puede sustituir el parámetro ``--cacert /ruta/al/ca.crt`` por la bandera ``-k`` para omitir temporalmente la validación estricta del certificado TLS.
