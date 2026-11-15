@@ -10,7 +10,7 @@ configurando una dirección IP estática para garantizar la estabilidad de los p
 1. Configuración de Red Estática en Rocky Linux
 ===============================================
 
-Para asegurar que la máquina virtual mantenga una IP fija (por ejemplo, ``192.168.123.41``) 
+Para asegurar que la máquina virtual mantenga una IP fija (por ejemplo, ``192.168.123.121``) 
 a través de reinicios, configure el perfil de red de la interfaz (por ejemplo, ``ens160``) mediante ``nmcli``:
 
 1. Modifique la conexión para establecer el método manual, la dirección IP, la puerta de enlace y los servidores DNS en un solo bloque:
@@ -68,7 +68,7 @@ y las herramientas básicas para el manejo de certificados y servicios de correo
 
    .. code-block:: bash
 
-      sudo EXTERNAL_URL="http://192.168.123.41" dnf install -y gitlab-ce
+      sudo EXTERNAL_URL="http://192.168.123.121" dnf install -y gitlab-ce
 
 3. Obtenga la contraseña temporal generada automáticamente para el usuario administrador ``root``:
 
@@ -76,7 +76,7 @@ y las herramientas básicas para el manejo de certificados y servicios de correo
 
       sudo cat /etc/gitlab/initial_root_password
 
-*Verificación:* Acceda desde su navegador web a ``http://192.168.123.41`` e inicie sesión con el usuario ``root`` y la contraseña obtenida.
+*Verificación:* Acceda desde su navegador web a ``http://192.168.123.121`` e inicie sesión con el usuario ``root`` y la contraseña obtenida.
 
 
 4. Instalación y Registro de GitLab Runner
@@ -95,7 +95,7 @@ Para ejecutar los trabajos de CI/CD automatizados:
 
    .. code-block:: bash
 
-      sudo gitlab-runner register --url "http://192.168.123.41/" --registration-token "TU_TOKEN_DE_REGISTRO"
+      sudo gitlab-runner register --url "http://192.168.123.121/" --registration-token "TU_TOKEN_DE_REGISTRO"
 
 3. Inicie y verifique el servicio del agente:
 
