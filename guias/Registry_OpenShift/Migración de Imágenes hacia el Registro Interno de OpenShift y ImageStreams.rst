@@ -125,6 +125,20 @@ Al recibir el ``push``, OpenShift crea y vincula automáticamente el objeto ``Im
    NAME              IMAGE REFERENCE                                                                                                                         UPDATED
    my-app-simple:9   image-registry.openshift-image-registry.svc:5000/demo-app/my-app-simple@sha256:4fa89ba99798443497df962c973f21683d67505e5b1817dbd8daf11af517c82b   17 seconds ago
 
+5.3. Actualizar la imagen en el Deployment
+
+Como en el manifiesto aun apunta al registro interno. Ejecuta el siguiente comando para forzar al deployment a usar la ruta interna del registry de OpenShift:
+
+.. code-block:: text
+
+   oc set image deployment/my-app-simple-dev *=image-registry.openshift-image-registry.svc:5000/demo-app/my-app-simple:9 -n demo-app
+
+Eliminar el pod bloqueado
+
+.. code-block:: text
+
+   oc delete pod -l app=my-app-simple -n demo-app
+
 6. Próximos Pasos en el Despliegue
 ==================================
 
