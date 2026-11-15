@@ -70,8 +70,10 @@
     Username: developer
     Password: developer
 
-Use the 'oc' command line interface:
-  $ eval $(crc oc-env)
-  $ oc login -u developer https://api.crc.testing:6443
-[cgomeznt@srvopenshift ~]$ eval $(crc oc-env)
-[cgomeznt@srvopenshift ~]$ 
+.. code-block:: bash
+
+    Use the 'oc' command line interface:
+      $ eval $(crc oc-env)
+      $ oc login -u developer https://api.crc.testing:6443
+    [cgomeznt@srvopenshift ~]$ eval $(crc oc-env)
+    [cgomeznt@srvopenshift ~]$ 
