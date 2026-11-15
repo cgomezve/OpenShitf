@@ -155,7 +155,7 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
                containers:
                - name: ${APP_NAME}
                  image: ${IMAGE_NAME}
-                 imagePullPolicy: Always
+                 imagePullPolicy: IfNotPresent
                  ports:
                  - containerPort: 8080
                    name: http
