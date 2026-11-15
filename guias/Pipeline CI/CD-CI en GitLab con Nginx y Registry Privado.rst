@@ -69,15 +69,15 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
 
 .. code-block:: yaml
 
-   stages:
+    stages:
      - build
      - registerDev
      - deployDev
    
    variables:
-     REPO_DEV: "192.168.123.150:4443/"
+     REPO_DEV: "192.168.123.150:4443"
      HOSTMASTER: "192.168.123.40"
-     PORT_KUBERNETES: "30080"
+     PORT_OPENSHIFT: "30080"
      USER: "gitlab-runner"
    
    nginx-build:
@@ -97,9 +97,9 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
    docker-build-dev:
      stage: registerDev
      script:
-       - echo "Construyendo y subiendo imagen al registry privado..."
-       - docker build -t ${REPO_DEV}${CI_PROJECT_NAME}:${CI_PIPELINE_ID} .
-       - docker push ${REPO_DEV}${CI_PROJECT_NAME}:${CI_PIPELINE_ID}
+       - echo "Construyendo y subiendo imagen a la raíz del registry..."
+       - docker build -t ${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID} .
+       - docker push ${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}
      tags:
        - shell
      only:
@@ -109,52 +109,102 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
      stage: deployDev
      script:
        - |
-         DEPLOYMENT_NAME="${CI_PROJECT_NAME}-${CI_PIPELINE_ID}"
-         IMAGE_NAME="${REPO_DEV}${CI_PROJECT_NAME}:${CI_PIPELINE_ID}"
+         APP_NAME="${CI_PROJECT_NAME}"
+         DEPLOYMENT_NAME="${CI_PROJECT_NAME}-dev"
+         IMAGE_NAME="${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}"
          
-         cat << 'END_YAML' > deployment.yaml
+         cat << END_YAML > openshift-manifests.yaml
+         apiVersion: v1
+         kind: Namespace
+         metadata:
+           name: demo-app
+         ---
+         apiVersion: v1
+         kind: ConfigMap
+         metadata:
+           name: nginx-config-dev
+           namespace: demo-app
+         data:
+           default.conf: |
+             server {
+                 listen 8080;
+                 server_name localhost;
+                 location / {
+                     root /usr/share/nginx/html;
+                     index index.html index.htm;
+                 }
+             }
+         ---
          apiVersion: apps/v1
          kind: Deployment
          metadata:
            name: ${DEPLOYMENT_NAME}
-           namespace: default
+           namespace: demo-app
            labels:
-             app: ${CI_PROJECT_NAME}
-             version: ${CI_PIPELINE_ID}
+             app: ${APP_NAME}
          spec:
            replicas: 1
            selector:
              matchLabels:
-               app: ${CI_PROJECT_NAME}
+               app: ${APP_NAME}
            template:
              metadata:
                labels:
-                 app: ${CI_PROJECT_NAME}
-                 version: ${CI_PIPELINE_ID}
+                 app: ${APP_NAME}
              spec:
                containers:
-               - name: ${CI_PROJECT_NAME}
+               - name: ${APP_NAME}
                  image: ${IMAGE_NAME}
                  imagePullPolicy: Always
                  ports:
-                 - containerPort: 80
+                 - containerPort: 8080
                    name: http
+                 securityContext:
+                   allowPrivilegeEscalation: false
+                   runAsNonRoot: true
+                 volumeMounts:
+                 - name: nginx-conf
+                   mountPath: /etc/nginx/conf.d
+                 - name: nginx-cache
+                   mountPath: /var/cache/nginx
+                 - name: nginx-run
+                   mountPath: /var/run
+               volumes:
+               - name: nginx-conf
+                 configMap:
+                   name: nginx-config-dev
+               - name: nginx-cache
+                 emptyDir: {}
+               - name: nginx-run
+                 emptyDir: {}
+         ---
+         apiVersion: v1
+         kind: Service
+         metadata:
+           name: ${APP_NAME}-service
+           namespace: demo-app
+         spec:
+           type: NodePort
+           selector:
+             app: ${APP_NAME}
+           ports:
+           - port: 8080
+             targetPort: 8080
+             nodePort: ${PORT_OPENSHIFT}
+             protocol: TCP
          END_YAML
          
-         echo "Copiando deployment.yaml al nodo master ${HOSTMASTER} como ${USER}..."
-         scp deployment.yaml ${USER}@${HOSTMASTER}:/tmp/
+         echo "Copiando manifiestos de OpenShift al nodo master ${HOSTMASTER} como ${USER}..."
+         scp openshift-manifests.yaml ${USER}@${HOSTMASTER}:/tmp/
          
-         echo "Ejecutando kubectl en el nodo master..."
-         ssh -t -t ${USER}@${HOSTMASTER} "sudo kubectl apply -f /tmp/deployment.yaml"
-         ssh -t -t ${USER}@${HOSTMASTER} "sudo kubectl delete service ${CI_PROJECT_NAME}-service --ignore-not-found=true"
-         ssh -t -t ${USER}@${HOSTMASTER} "sudo kubectl create service nodeport ${CI_PROJECT_NAME}-service --tcp=80:80 --node-port=${PORT_KUBERNETES}"
-         ssh -t -t ${USER}@${HOSTMASTER} "sudo kubectl rollout status deployment/${DEPLOYMENT_NAME}"
-         ssh -t -t ${USER}@${HOSTMASTER} "sudo kubectl get pods -l app=${CI_PROJECT_NAME}"
+         echo "Aplicando configuración en OpenShift Local..."
+         ssh -t -t ${USER}@${HOSTMASTER} "oc apply -f /tmp/openshift-manifests.yaml"
+         ssh -t -t ${USER}@${HOSTMASTER} "oc rollout status deployment/${DEPLOYMENT_NAME} -n demo-app"
+         ssh -t -t ${USER}@${HOSTMASTER} "oc get pods -n demo-app -l app=${APP_NAME}"
      tags:
        - shell
      only:
        - develop
-
 
 4. Resolución de Permisos y Autenticación
 =========================================
