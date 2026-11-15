@@ -44,7 +44,7 @@ y las herramientas básicas para el manejo de certificados y servicios de correo
 
    .. code-block:: bash
 
-      sudo dnf install -y curl policycoreutils opensh-server postfix
+      sudo dnf install -y curl policycoreutils openssh-server postfix
 
 3. Habilite e inicie el servicio de correo Postfix:
 
