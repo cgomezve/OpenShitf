@@ -73,13 +73,13 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
      - build
      - registerDev
      - deployDev
-
+   
    variables:
-     REPO_DEV: "192.168.123.150:4443"
+     REPO_DEV: "192.168.123.150:4443/"
      HOSTMASTER: "192.168.123.40"
      PORT_KUBERNETES: "30080"
      USER: "gitlab-runner"
-
+   
    nginx-build:
      stage: build
      script:
@@ -93,24 +93,24 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
          - Dockerfile
      only:
        - develop
-
+   
    docker-build-dev:
      stage: registerDev
      script:
-       - echo "Construyendo y subiendo imagen a la raíz del registry..."
-       - docker build -t ${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID} .
-       - docker push ${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}
+       - echo "Construyendo y subiendo imagen al registry privado..."
+       - docker build -t ${REPO_DEV}${CI_PROJECT_NAME}:${CI_PIPELINE_ID} .
+       - docker push ${REPO_DEV}${CI_PROJECT_NAME}:${CI_PIPELINE_ID}
      tags:
        - shell
      only:
        - develop
-
+   
    deploy-dev:
      stage: deployDev
      script:
        - |
          DEPLOYMENT_NAME="${CI_PROJECT_NAME}-${CI_PIPELINE_ID}"
-         IMAGE_NAME="${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}"
+         IMAGE_NAME="${REPO_DEV}${CI_PROJECT_NAME}:${CI_PIPELINE_ID}"
          
          cat << 'END_YAML' > deployment.yaml
          apiVersion: apps/v1
@@ -154,6 +154,7 @@ El pipeline replica una estructura de producción con tres etapas (``build``, ``
        - shell
      only:
        - develop
+
 
 4. Resolución de Permisos y Autenticación
 =========================================
