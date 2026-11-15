@@ -18,13 +18,13 @@ un certificado y una llave privada.
 
    .. code-block:: bash
 
-      sudo mkdir -p /etc/docker/certs.d/192.168.123.121:4443
+      sudo mkdir -p /etc/docker/certs.d/192.168.123.150:4443
 
 2. Genere un certificado autofirmado (reemplace la IP o dominio según corresponda):
 
    .. code-block:: bash
 
-      sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout /etc/docker/certs.d/192.168.123.121:4443/domain.key -x509 -days 365 -out /etc/docker/certs.d/192.168.123.121:4443/domain.crt -subj "/CN=10.134.0.89"
+      sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout /etc/docker/certs.d/192.168.123.150:4443/domain.key -x509 -days 365 -out /etc/docker/certs.d/192.168.123.150:4443/domain.crt -subj "/CN=10.134.0.89"
 
 *Verificación:* Compruebe que los archivos ``domain.key`` y ``domain.crt`` existan dentro de la ruta creada.
 
@@ -43,7 +43,7 @@ montando el volumen de certificados y configurando un directorio de almacenamien
         --restart=always \
         --name registry \
         -v /var/lib/registry:/var/lib/registry \
-        -v /etc/docker/certs.d/192.168.123.121:4443:/certs \
+        -v /etc/docker/certs.d/192.168.123.150:4443:/certs \
         -e REGISTRY_HTTP_ADDR=0.0.0.0:5000 \
         -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/domain.crt \
         -e REGISTRY_HTTP_TLS_KEY=/certs/domain.key \
@@ -62,7 +62,7 @@ Para que cualquier nodo o servidor que interactúe con el registry confíe en el
 
    .. code-block:: bash
 
-      sudo cp /etc/docker/certs.d/192.168.123.121:4443/domain.crt /etc/pki/ca-trust/source/anchors/registry-domain.crt
+      sudo cp /etc/docker/certs.d/192.168.123.150:4443/domain.crt /etc/pki/ca-trust/source/anchors/registry-domain.crt
       sudo update-ca-trust
 
 2. Reinicie el servicio de Docker para aplicar los cambios:
@@ -75,6 +75,6 @@ Para que cualquier nodo o servidor que interactúe con el registry confíe en el
 
 .. code-block:: bash
 
-   curl -k https://192.168.123.121:4443/v2/_catalog
+   curl -k https://192.168.123.150:4443/v2/_catalog
 
 *Resultado esperado:* El servidor responderá con un JSON vacío ``{"repositories":[]}`` indicando que la capa HTTPS opera correctamente.
