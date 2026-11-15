@@ -101,6 +101,8 @@ Ejecutar un comando de prueba remoto para verificar que el acceso se realiza sin
 
 .. code-block:: bash
 
+   su - gitlab-runner
+
    ssh gitlab-runner@192.168.123.40 "hostname && whoami"
 
 *Resultado esperado:* Debe devolver el nombre del host destino y ``gitlab-runner`` inmediatamente.
