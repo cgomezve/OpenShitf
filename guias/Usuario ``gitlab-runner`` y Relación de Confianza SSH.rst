@@ -105,46 +105,48 @@ Ejecutar un comando de prueba remoto para verificar que el acceso se realiza sin
 
 *Resultado esperado:* Debe devolver el nombre del host destino y ``gitlab-runner`` inmediatamente.
 
-3. Habilitación de Cliente OpenShift (``oc``) para ``gitlab-runner``
-====================================================================
+3. Habilitación de Cliente OpenShift (``oc``) y Credenciales para ``gitlab-runner``
+===================================================================================
 
-Una vez establecida la sesión en el nodo master (``192.168.123.40``) bajo el usuario ``gitlab-runner``, verificar el acceso al binario ``oc`` y la sesión activa contra el clúster CRC.
+En el nodo master de OpenShift Local (``192.168.123.40``), es necesario exponer el binario ``oc`` de forma global en el sistema y transferir el archivo de configuración de sesión (``kubeconfig``) hacia el directorio personal de ``gitlab-runner``.
 
-3.1. Verificar disponibilidad del binario ``oc`` en el PATH
------------------------------------------------------------
-.. code-block:: bash
-
-   which oc
-   oc version
-
-*Nota:* Si el comando ``oc`` no se encuentra en el PATH del usuario ``gitlab-runner``, copiar o enlazar el binario desde la ruta de instalación de CRC (habitualmente ``~/.crc/bin/oc/oc`` del usuario que instaló CRC hacia ``/usr/local/bin/oc``) usando ``root``:
+3.1. Crear enlace simbólico global del binario ``oc``
+-----------------------------------------------------
+Con un usuario con privilegios de administrador (ej. ``cgomeznt``), ubicar el binario ``oc`` en la caché de CRC y enlazarlo hacia ``/usr/local/bin/oc`` para que esté disponible en el ``PATH`` de todos los usuarios:
 
 .. code-block:: bash
 
-   sudo cp /ruta/hacia/oc /usr/local/bin/oc
-   sudo chmod +x /usr/local/bin/oc
+   sudo ln -s /home/cgomeznt/.crc/cache/crc_libvirt_4.22.14_amd64/oc /usr/local/bin/oc
 
-3.2. Iniciar sesión en el clúster OpenShift Local
--------------------------------------------------
-Como usuario ``gitlab-runner`` en el nodo ``192.168.123.40``, comprobar la sesión actual:
+*Verificación:* Comprobar que el binario es accesible desde cualquier ruta ejecutando ``which oc``.
+
+3.2. Transferir configuración del clúster (``kubeconfig``)
+----------------------------------------------------------
+Copiar el archivo ``config`` de la sesión activa hacia el directorio ``~/.kube/`` del usuario ``gitlab-runner`` y asignar la propiedad correspondiente:
 
 .. code-block:: bash
 
+   sudo mkdir -p /home/gitlab-runner/.kube
+   sudo cp /home/cgomeznt/.kube/config /home/gitlab-runner/.kube/config
+   sudo chown -R gitlab-runner:gitlab-runner /home/gitlab-runner/.kube
+
+3.3. Validar acceso y contexto de OpenShift
+-------------------------------------------
+Cambiar al usuario ``gitlab-runner`` y verificar la autenticación contra el clúster CRC:
+
+.. code-block:: bash
+
+   sudo su - gitlab-runner
    oc whoami
+   oc get projects
 
-Si retorna error de sesión no iniciada, autenticarse contra la API local de OpenShift (CRC) para guardar el contexto en ``~/.kube/config``:
-
-.. code-block:: bash
-
-   oc login -u kubeadmin -p <PASSWORD_KUBEADMIN> https://api.crc.testing:6443 --insecure-skip-tls-verify=true
-
-*Verificación:* Ejecutar ``oc get projects`` para confirmar que el usuario ``gitlab-runner`` tiene visibilidad y permisos de administración sobre los proyectos y namespaces del clúster.
+*Resultado esperado:* ``oc whoami`` debe devolver ``kubeadmin`` (o el usuario administrador activo) y ``oc get projects`` debe listar los namespaces disponibles sin errores de configuración.
 
 4. Resumen de Validación Pre-Pipeline
 =====================================
 
 Antes de relanzar el pipeline en GitLab, verificar los siguientes tres puntos desde el servidor ``192.168.123.121`` como usuario ``gitlab-runner``:
 
-1. ``ssh gitlab-runner@192.168.123.40 "oc whoami"`` devuelve ``kubeadmin`` (o el usuario administrador configurado) sin pedir contraseña.
+1. ``ssh gitlab-runner@192.168.123.40 "oc whoami"`` devuelve ``kubeadmin`` sin pedir contraseña.
 2. El usuario ``gitlab-runner`` en ``192.168.123.121`` pertenece al grupo ``docker`` (``groups gitlab-runner``).
 3. El enrutamiento ``iptables`` hacia ``127.0.0.1:30080`` se encuentra activo en ``192.168.123.40`` para exponer el servicio NodePort.
