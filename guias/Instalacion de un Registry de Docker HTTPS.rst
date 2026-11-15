@@ -47,7 +47,7 @@ montando el volumen de certificados y configurando un directorio de almacenamien
         -e REGISTRY_HTTP_ADDR=0.0.0.0:5000 \
         -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/domain.crt \
         -e REGISTRY_HTTP_TLS_KEY=/certs/domain.key \
-        -p 5000:5000 \
+        -p 4443:5000 \
         registry:2
 
 *Verificación:* Ejecute ``sudo docker ps`` y confirme que el contenedor ``registry`` se encuentra en estado ``Up``.
