@@ -1,97 +1,118 @@
 =============================================================================
-Listado Cronológico y Consolidado de Tareas, Configuraciones y Diagnósticos
+Listado Cronológico y Consolidado Global de Tareas, Configuraciones y
+Diagnósticos
 =============================================================================
 
-Listado cronológico y consolidado de todas las tareas, configuraciones y
-diagnósticos que hemos ejecutado a lo largo de todo este laboratorio, desde la
-preparación base hasta la automatización y diagnóstico de OpenShift y GitLab.
+1. Preparación de Entornos de Homelab y Servidores Base
+=======================================================
 
-1. Preparación Base, Repositorios y GitLab
-==========================================
+- **Aprovisionamiento del Equipo Local (Homelab):** Configuración inicial del
+  mini PC GMKtec M6 Ultra (AMD Ryzen 5 7640HS, 32 GB RAM, 1 TB SSD) ejecutando
+  Rocky Linux 9.8.
 
-- Creación del proyecto ``my-app-simple`` en GitLab y configuración de
-  repositorio local en la rama ``develop``.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+- **Despliegue de OpenShift Local (CRC):** Instalación, inicialización y
+  configuración de clústeres locales para pruebas de desarrollo e
+  infraestructura orientadas al entorno corporativo.
 
-- Creación de la página web estática (``index.html``) y definición de la
-  imagen base de contenedor (``Dockerfile`` con ``nginx:alpine``).
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+- **Infraestructura de Red y Acceso:** Configuración de conectividad, reglas
+  de reenvío de puertos, y direccionamiento IP para el acceso remoto y local a
+  los nodos del clúster.
 
-- Configuración de autenticación en GitLab mediante Personal Access Token
-  (PAT) para operaciones ``git push`` sobre HTTP.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+2. Administración de Servicios de Red, Seguridad y Enrutamiento (iptables / Linux)
+=================================================================================
 
-- Configuración de permisos en el servidor GitLab (``srvgitlab``) añadiendo
-  al usuario ``gitlab-runner`` al grupo ``docker`` y reiniciando los
-  servicios.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+- **Diagnóstico de Red en Servidores:** Identificación y resolución de
+  problemas de redirección de tráfico externo utilizando tablas NAT en Linux.
 
-2. Configuración de Seguridad, Permisos y Registry en OpenShift
-===============================================================
+- **Configuración de Puertos y Bucles Locales:**
 
-- Creación del namespace de despliegue (``demo-app``) y configuración inicial
-  de registro inseguro en el clúster OpenShift Local / CRC mediante
-  ``oc patch image.config.openshift.io/cluster``.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+  - Habilitación del parámetro del kernel
+    ``net.ipv4.conf.all.route_localnet=1`` para permitir el reenvío de tráfico
+    hacia direcciones de loopback (``127.0.0.1``).
 
-- Creación de la cuenta de servicio global (``global-gitlab-deployer``) en el
-  namespace ``openshift-image-registry``.
+  - Aplicación y depuración de reglas en las cadenas ``PREROUTING``,
+    ``OUTPUT`` y ``POSTROUTING`` (``MASQUERADE``) para mapear puertos expuestos
+    (como el ``30080`` de los NodePort en OpenShift) hacia servicios locales.
 
-- Asignación de roles administrativos y de registro (``cluster-admin``,
-  ``system:image-builder``, ``system:image-puller`` y ``admin``) mediante
-  ``oc adm policy`` y ``oc policy``.
+3. Integración de GitLab, CI/CD y Automatización de Pipelines
+=============================================================
 
-- Generación de tokens de autenticación (tanto efímeros de larga duración con
-  ``oc create token --duration=8760h`` / ``720h`` como pruebas de Secret de
-  tipo ``kubernetes.io/service-account-token``).
+- **Estructuración de Proyectos:** Creación y configuración de repositorios
+  Git (ej. ``my-app-simple``) orientados a la gestión de aplicaciones estáticas
+  y contenedores Nginx.
 
-- Registro del token JWT como variable enmascarada (``OPENSHIFT_TOKEN``)
-  dentro de GitLab CI/CD.
+- **Configuración del Servidor GitLab (``srvgitlab``):**
 
-- Configuración del demonio Docker en ``srvgitlab``
-  (``/etc/docker/daemon.json``) declarando
-  ``default-route-openshift-image-registry.apps-crc.testing`` como
-  ``insecure-registries``.
+  - Integración del usuario ``gitlab-runner`` al grupo ``docker`` y reinicio
+    de servicios asociados.
 
-3. Desarrollo y Estabilización del Pipeline CI/CD (.gitlab-ci.yml)
-==================================================================
+  - Configuración del demonio Docker (``/etc/docker/daemon.json``) declarando
+    los registros internos de OpenShift
+    (``default-route-openshift-image-registry.apps-crc.testing``) dentro de los
+    ``insecure-registries``.
 
-- Estructuración del pipeline en tres etapas: ``build``, ``registerDev`` y
-  ``deployDev``.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+- **Desarrollo del Archivo ``.gitlab-ci.yml``:**
 
-- Implementación de login automatizado y seguro hacia el registry interno de
-  OpenShift utilizando ``docker login --password-stdin``.
+  - Diseño de pipelines en múltiples etapas (``build``, ``registerDev``,
+    ``deployDev``).
 
-- Compilación y subida automática de imágenes etiquetadas con
-  ``$CI_PIPELINE_ID`` directamente al registro interno de OpenShift.
+  - Automatización de la compilación de imágenes de contenedores mediante
+    ``docker build``.
 
-- Generación dinámica y despliegue automatizado de manifiestos de OpenShift
-  (Namespace, ImageStream, ConfigMap de Nginx en puerto 8080, Deployment
-  adaptado a restricciones de seguridad ``runAsNonRoot`` y Service tipo
-  NodePort en puerto 30080) vía ``scp`` y ``ssh`` hacia ``srvopenshift``.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+  - Autenticación segura y robusta hacia el registro de OpenShift utilizando
+    tuberías estándar (``docker login --password-stdin``).
 
-- Verificación de despliegue automático mediante ``oc rollout status`` y
-  validación externa con ``curl`` hacia el puerto 30080.
-  *(Ref: CD-CI en GitLab con Nginx y Registry Privado.rst)*
+  - Generación y despliegue automatizado de manifiestos YAML (Namespace,
+    ImageStream, ConfigMap, Deployment y Service tipo NodePort) ejecutados
+    remotamente vía ``scp`` y ``ssh``.
 
-4. Operación, Mantenimiento y Diagnóstico en OpenShift
-======================================================
+4. Gestión de Identidades, Permisos y Tokens en OpenShift
+=========================================================
 
-- Inspección de estado de pods y etiquetas de flujo de imágenes mediante
-  ``oc get pods,istag -n demo-app``.
+- **Creación de Cuentas de Servicio (ServiceAccounts):** Creación de cuentas
+  dedicadas (ej. ``global-gitlab-deployer``) en el namespace
+  ``openshift-image-registry``.
 
-- Limpieza y eliminación de etiquetas obsoletas de ImageStreamTag con
-  ``oc delete istag/<nombre>:<tag> -n demo-app``.
+- **Asignación de Roles RBAC:**
 
-- Corrección de sintaxis para inspección detallada de eventos y errores en
-  pods mediante ``oc describe pod <nombre-pod>``.
+  - Asignación de privilegios administrativos y de gestión de imágenes
+    (``cluster-admin``, ``system:image-builder``, ``system:image-puller``,
+    ``admin``) mediante ``oc policy`` y ``oc adm policy``.
 
-- Homologación del flujo de diagnóstico tradicional de Kubernetes
-  (``crictl images`` / ``crictl pull``) hacia el entorno CRI-O y
-  ``oc debug node/`` en OpenShift para aislar fallos de red, certificados TLS
-  o permisos RBAC.
+- **Estrategia de Autenticación Permanente:**
 
-- Estructuración y depuración de toda la documentación técnica del proyecto en
-  formato reStructuredText (``.rst``).
+  - Evaluación de tokens efímeros y creación de recursos de tipo Secret
+    (``kubernetes.io/service-account-token``) para generar tokens de larga
+    duración / perpetuos sin fecha de caducidad.
+
+  - Configuración y enmascaramiento de las credenciales JWT
+    (``OPENSHIFT_TOKEN``) en las variables globales de GitLab CI/CD.
+
+5. Operación, Monitoreo y Diagnóstico en OpenShift
+==================================================
+
+- **Inspección de Recursos del Clúster:**
+
+  - Monitoreo del estado de los Pods y despliegues (``oc get pods``,
+    ``oc rollout status``).
+
+  - Consulta, filtrado y eliminación de etiquetas de imágenes obsoletas
+    mediante ``oc get istag`` y ``oc delete istag``.
+
+- **Diagnóstico Avanzado:**
+
+  - Corrección de sintaxis en comandos de inspección detallada
+    (``oc describe pod <nombre>``).
+
+  - Utilización de herramientas del ecosistema subyacente
+    (``crictl images``, ``crictl pull``, contenedores de debug con
+    ``oc debug node/``) para aislar fallos de red, almacenamiento NFS,
+    volúmenes persistentes (PVCs) o certificados TLS en CRI-O.
+
+6. Documentación Técnica Normalizada
+====================================
+
+- **Generación de Manuales:** Estructuración y refinamiento de guías
+  operativas completas y procedimientos definitivos utilizando sintaxis
+  reStructuredText (``.rst``), optimizados para la lectura técnica y el
+  mantenimiento de la infraestructura.
