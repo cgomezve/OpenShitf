@@ -16,3 +16,11 @@ habilite el reenvío del kernel y las reglas de NAT:
       sudo iptables -t nat -A PREROUTING -p tcp -d 192.168.123.40 --dport 30021 -j DNAT --to-destination 127.0.0.1:30021
       sudo iptables -t nat -A OUTPUT -p tcp -d 192.168.123.40 --dport 30021 -j DNAT --to-destination 127.0.0.1:30021
 
+      sudo iptables -t nat -A POSTROUTING -p tcp -d 127.0.0.1 --dport 30080 -j MASQUERADE
+
+3. Si quieres borrar todo
+
+   .. code-block:: bash
+
+      sudo iptables -t nat -F PREROUTING
+      sudo iptables -t nat -F OUTPUT
