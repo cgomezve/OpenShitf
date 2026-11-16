@@ -1,5 +1,5 @@
 =============================================================================
-Procedimiento Definitivo: Autenticación Permanente en Registry de OpenShift 
+Procedimiento Definitivo: Autenticación Permanente en Registry de OpenShift
 y Automatización CI/CD con GitLab
 =============================================================================
 
@@ -13,12 +13,12 @@ y Automatización CI/CD con GitLab
    :depth: 2
 
 1. Introducción y Arquitectura de la Solución
-============================================
+=============================================
 
 Este documento consolida el procedimiento definitivo para configurar un pipeline de **GitLab CI/CD** robusto y permanente. Se elimina el problema de expiración de tokens mediante el uso de un secreto basado en tokens de larga duración, permitiendo a los pipelines compilar, autenticarse y subir imágenes directamente al **Registry Interno de OpenShift** sin intervención manual.
 
 2. Creación de Cuenta de Servicio y Token Permanente
-=====================================================
+====================================================
 
 Para evitar la caducidad anual de los tokens de servicio estándar, se genera un recurso de tipo token de larga duración asociado a la cuenta de servicio global del registro.
 
@@ -32,7 +32,7 @@ Ejecutar en el nodo de OpenShift (``srvopenshift``) con privilegios de administr
    oc create sa global-gitlab-deployer -n openshift-image-registry
 
 2.2. Asignar Permisos de Administrador y Constructor
------------------------------------------------------
+----------------------------------------------------
 
 Otorgar los roles necesarios para la gestión del clúster y construcción de imágenes:
 
@@ -63,10 +63,12 @@ Generar un secreto de tipo token de servicio que no expira y extraer su valor co
    # Extraer y decodificar el JWT definitivo
    oc get secret global-gitlab-deployer-token -n openshift-image-registry -o jsonpath='{.data.token}' | base64 --decode
 
-*Nota:* Copiar esta cadena completa que inicia con ``eyJ...`` para configurarla de forma permanente en GitLab.
+.. note::
+
+   Copiar esta cadena completa que inicia con ``eyJ...`` para configurarla de forma permanente en GitLab.
 
 3. Configuración del Servidor GitLab y Demonio Docker
-======================================================
+=====================================================
 
 Para que el servidor GitLab (``srvgitlab``) confíe en el registro interno expuesto por HTTPS con certificado autofirmado:
 
@@ -84,7 +86,7 @@ Editar o crear el archivo ``/etc/docker/daemon.json``:
    }
 
 3.2. Reiniciar el Servicio Docker
-----------------------------------
+---------------------------------
 
 .. code-block:: bash
 
@@ -94,15 +96,16 @@ Editar o crear el archivo ``/etc/docker/daemon.json``:
 =======================================
 
 1. Ingresar a la interfaz web de GitLab en el proyecto correspondiente.
-2. Navegar a **Settings** > **CI/CD** > **Variables** y hacer clic en **Add variable**.
+2. Navegar a **Settings > CI/CD > Variables** y hacer clic en **Add variable**.
 3. Registrar los siguientes parámetros:
+
    * **Key:** ``OPENSHIFT_TOKEN``
    * **Value:** *(Pegar el token permanente obtenido en el paso 2.3)*
    * **Mask variable:** Activado (para proteger la credencial en los logs).
-   * **Protect variable:** Opcional (según si la rama `develop` es protegida).
+   * **Protect variable:** Opcional (según si la rama ``develop`` es protegida).
 
 5. Definición del Pipeline (``.gitlab-ci.yml``)
-================================================
+===============================================
 
 El siguiente archivo automatiza las etapas de compilación, autenticación segura mediante entrada estándar (``--password-stdin``), subida al registro y aplicación de manifiestos:
 
@@ -138,7 +141,6 @@ El siguiente archivo automatiza las etapas de compilación, autenticación segur
      script:
        - echo "Autenticando contra el registro interno de OpenShift con token global..."
        - echo "${OPENSHIFT_TOKEN}" | docker login default-route-openshift-image-registry.apps-crc.testing -u global-gitlab-deployer --password-stdin
-       
        - echo "Construyendo y subiendo imagen directamente al registry interno..."
        - docker build -t ${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID} .
        - docker push ${REPO_DEV}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}
@@ -154,7 +156,7 @@ El siguiente archivo automatiza las etapas de compilación, autenticación segur
          APP_NAME="${CI_PROJECT_NAME}"
          DEPLOYMENT_NAME="${CI_PROJECT_NAME}-dev"
          IMAGE_NAME="image-registry.openshift-image-registry.svc:5000/demo-app/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}"
-         
+
          cat << END_YAML > openshift-manifests.yaml
          apiVersion: v1
          kind: Namespace
@@ -241,10 +243,10 @@ El siguiente archivo automatiza las etapas de compilación, autenticación segur
              nodePort: ${PORT_OPENSHIFT}
              protocol: TCP
          END_YAML
-         
+
          echo "Copiando manifiestos de OpenShift al nodo master ${HOSTMASTER}..."
          scp openshift-manifests.yaml ${USER}@${HOSTMASTER}:/tmp/
-         
+
          echo "Aplicando configuración en OpenShift Local..."
          ssh -t -t ${USER}@${HOSTMASTER} "oc apply -f /tmp/openshift-manifests.yaml"
          ssh -t -t ${USER}@${HOSTMASTER} "oc rollout status deployment/${DEPLOYMENT_NAME} -n demo-app"
