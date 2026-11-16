@@ -11,21 +11,29 @@ y Automatización CI/CD con GitLab
 
 .. contents:: Tabla de Contenidos
    :depth: 2
+   :local:
 
 1. Introducción y Arquitectura de la Solución
 =============================================
 
-Este documento consolida el procedimiento definitivo para configurar un pipeline de **GitLab CI/CD** robusto y permanente. Se elimina el problema de expiración de tokens mediante el uso de un secreto basado en tokens de larga duración, permitiendo a los pipelines compilar, autenticarse y subir imágenes directamente al **Registry Interno de OpenShift** sin intervención manual.
+Este documento consolida el procedimiento definitivo para configurar un
+pipeline de **GitLab CI/CD** robusto y permanente. Se elimina el problema de
+expiración de tokens mediante el uso de un secreto basado en tokens de larga
+duración, permitiendo a los pipelines compilar, autenticarse y subir imágenes
+directamente al **Registry Interno de OpenShift** sin intervención manual.
 
 2. Creación de Cuenta de Servicio y Token Permanente
 ====================================================
 
-Para evitar la caducidad anual de los tokens de servicio estándar, se genera un recurso de tipo token de larga duración asociado a la cuenta de servicio global del registro.
+Para evitar la caducidad anual de los tokens de servicio estándar, se genera
+un recurso de tipo token de larga duración asociado a la cuenta de servicio
+global del registro.
 
 2.1. Crear la Cuenta de Servicio Global
 ---------------------------------------
 
-Ejecutar en el nodo de OpenShift (``srvopenshift``) con privilegios de administrador:
+Ejecutar en el nodo de OpenShift (``srvopenshift``) con privilegios de
+administrador:
 
 .. code-block:: bash
 
@@ -34,7 +42,8 @@ Ejecutar en el nodo de OpenShift (``srvopenshift``) con privilegios de administr
 2.2. Asignar Permisos de Administrador y Constructor
 ----------------------------------------------------
 
-Otorgar los roles necesarios para la gestión del clúster y construcción de imágenes:
+Otorgar los roles necesarios para la gestión del clúster y construcción de
+imágenes:
 
 .. code-block:: bash
 
@@ -45,7 +54,8 @@ Otorgar los roles necesarios para la gestión del clúster y construcción de im
 2.3. Crear el Secreto Permanente y Extraer el Token
 ---------------------------------------------------
 
-Generar un secreto de tipo token de servicio que no expira y extraer su valor codificado:
+Generar un secreto de tipo token de servicio que no expira y extraer su valor
+codificado:
 
 .. code-block:: bash
 
@@ -65,12 +75,14 @@ Generar un secreto de tipo token de servicio que no expira y extraer su valor co
 
 .. note::
 
-   Copiar esta cadena completa que inicia con ``eyJ...`` para configurarla de forma permanente en GitLab.
+   Copiar esta cadena completa que inicia con ``eyJ...`` para configurarla de
+   forma permanente en GitLab.
 
 3. Configuración del Servidor GitLab y Demonio Docker
 =====================================================
 
-Para que el servidor GitLab (``srvgitlab``) confíe en el registro interno expuesto por HTTPS con certificado autofirmado:
+Para que el servidor GitLab (``srvgitlab``) confíe en el registro interno
+expuesto por HTTPS con certificado autofirmado:
 
 3.1. Configurar Registros Inseguros
 -----------------------------------
@@ -107,7 +119,9 @@ Editar o crear el archivo ``/etc/docker/daemon.json``:
 5. Definición del Pipeline (``.gitlab-ci.yml``)
 ===============================================
 
-El siguiente archivo automatiza las etapas de compilación, autenticación segura mediante entrada estándar (``--password-stdin``), subida al registro y aplicación de manifiestos:
+El siguiente archivo automatiza las etapas de compilación, autenticación segura
+mediante entrada estándar (``--password-stdin``), subida al registro y
+aplicación de manifiestos:
 
 .. code-block:: yaml
 
@@ -265,8 +279,9 @@ Para validar el estado de los componentes desplegados en el clúster:
 
    oc get pods,istag -n demo-app
 
-**Resultado Esperado:**
-Los Pods se encuentran en estado ``Running`` y las etiquetas de imagen (**ImageStreamTags**, o ``istag``) reflejan de manera precisa la versión desplegada en el registro interno.
+**Resultado Esperado:** Los Pods se encuentran en estado ``Running`` y las
+etiquetas de imagen (**ImageStreamTags**, o ``istag``) reflejan de manera
+precisa la versión desplegada en el registro interno.
 
 Para eliminar etiquetas obsoletas de ImageStream que ya no se utilicen:
 
