@@ -3,7 +3,7 @@ Despliegue seguro en OpenShift desde GitLab Runner sin SSH al Bastion
 =================================================================
 
 :Autor: Equipo de Plataforma
-:Versión: 1.0
+:Versión: 1.1
 :Fecha: |today|
 :Estado: Documento técnico / Runbook
 
@@ -242,6 +242,160 @@ archivos temporales en el Bastion:
    En producción, reemplaza ``--insecure-skip-tls-verify=true`` por
    ``--certificate-authority=$OPENSHIFT_CA_CERT``.
 
+6. Escalabilidad: arquitectura para más de 120 aplicaciones
+===========================================================
+
+Cuando el número de aplicaciones crece por encima del centenar, el modelo de
+"una ServiceAccount y un namespace por aplicación" deja de ser sostenible
+operativamente. Esta sección describe cómo adaptar el flujo anterior sin
+sacrificar aislamiento ni seguridad.
+
+6.1 Por qué NO colocar 120 aplicaciones en un único namespace
+-------------------------------------------------------------
+
+Colocar las 120 aplicaciones dentro de un único namespace en producción es un
+**antipatrón grave** en OpenShift/Kubernetes y genera problemas operativos
+críticos a corto plazo:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Problema
+     - Impacto
+   * - **Colisión de nombres de recursos**
+     - En un mismo namespace no pueden existir dos objetos ``ConfigMap``,
+       ``Secret``, ``Service`` o ``Route`` con el mismo nombre. Si dos equipos
+       llaman a su configuración ``app-config`` o ``redis-secret``, el
+       segundo pipeline sobrescribirá al primero.
+   * - **Radio de explosión (Blast Radius) y RBAC**
+     - Si todas comparten namespace, cualquier token o desarrollador con
+       acceso de lectura/escritura ve las variables de entorno, contraseñas y
+       certificados (``Secrets``) de las 120 aplicaciones.
+   * - **Agotamiento de recursos y cuotas**
+     - En OpenShift se aplican ``ResourceQuotas`` y ``LimitRanges`` por
+       namespace para evitar que una aplicación con fuga de memoria tumbe los
+       Workers. Si todas están juntas, una sola aplicación descontrolada puede
+       consumir toda la cuota e impedir que las demás escalen.
+   * - **Ruido operativo en diagnóstico**
+     - Hacer ``oc get pods`` o buscar eventos en un namespace con 300+ pods y
+       cientos de ``ReplicaSets`` vuelve lenta y propensa a errores cualquier
+       intervención de guardia.
+
+6.2 Arquitectura recomendada: 120 aplicaciones sin perder el control en CI/CD
+----------------------------------------------------------------------------
+
+Para no administrar 120 tokens distintos ni 120 ServiceAccounts manuales,
+combina estas tres mejores prácticas empresariales.
+
+Segmentación por dominio de negocio o tribu
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+En lugar de un megacontenedor o 120 namespaces atomizados, agrupa las
+aplicaciones por unidad funcional o célula de negocio. Por ejemplo:
+
+* ``pagos-prod``
+* ``canales-digitales-prod``
+* ``core-bancario-prod``
+* ``integracion-wso2-prod``
+
+Así reduces la gestión a unos **10 a 15 namespaces lógicos**, manteniendo
+aislados los ``Secrets``, cuotas de CPU/RAM y políticas de red
+(``NetworkPolicy``).
+
+Una sola ServiceAccount central de CI/CD con un ClusterRole acotado
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Para evitar crear decenas de tokens, crea una única identidad para tu
+plataforma GitLab en un namespace administrativo (por ejemplo,
+``cicd-tools``). En lugar de darle ``cluster-admin`` (que le permitiría
+borrar nodos o modificar el clúster), créale un ``ClusterRole``
+personalizado que solo le permita gestionar recursos de aplicación
+(``Deployments``, ``Services``, ``Routes``, ``ConfigMaps``,
+``ImageStreams``), bloqueando recursos críticos de infraestructura
+(``Nodes``, ``ClusterOperators``, ``PVs``, ``Roles``).
+
+.. code-block:: yaml
+
+   apiVersion: rbac.authorization.k8s.io/v1
+   kind: ClusterRole
+   metadata:
+     name: gitlab-cicd-deployer-role
+   rules:
+     - apiGroups: ["", "apps", "route.openshift.io", "image.openshift.io"]
+       resources: ["deployments", "replicasets", "pods", "services", "routes", "configmaps", "secrets", "imagestreams", "imagestreamtags"]
+       verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+Luego vincula este rol global a tu única cuenta ``gitlab-deployer``:
+
+.. code-block:: bash
+
+   oc adm policy add-cluster-role-to-user gitlab-cicd-deployer-role \
+     system:serviceaccount:cicd-tools:gitlab-deployer
+
+Variables a nivel de grupo en GitLab + plantilla única (``include``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Para no configurar tokens ni mantener 120 archivos ``.gitlab-ci.yml``
+distintos:
+
+**Variables heredadas (Group Level):** En GitLab, mete los 120 repositorios
+dentro de un Grupo o Subgrupos (por ejemplo,
+``empresa/microservicios/...``). Configura ``OPENSHIFT_SERVER`` y
+``OPENSHIFT_TOKEN`` una sola vez a nivel del Grupo raíz. Todos los 120
+proyectos heredarán automáticamente esas credenciales; cuando rotes el token,
+lo cambias en un solo sitio y se actualiza para las 120 apps.
+
+**Namespace dinámico por proyecto:** Cada repositorio define únicamente su
+variable local ``OPENSHIFT_NAMESPACE`` (por ejemplo, ``pagos-prod``).
+
+**Pipeline centralizado (template):** Crea un repositorio central
+``ci-templates`` con un único archivo ``openshift-deploy.yml`` estandarizado.
+Los 120 proyectos solo tendrán un ``.gitlab-ci.yml`` de 4 líneas llamando a
+esa plantilla:
+
+.. code-block:: yaml
+
+   include:
+     - project: 'devops/ci-templates'
+       file: '/templates/openshift-deploy.yml'
+
+   variables:
+     OPENSHIFT_NAMESPACE: "pagos-prod"
+     APP_NAME: "servicio-autorizaciones"
+
+6.3 Comparativa de estrategias para 120 aplicaciones
+----------------------------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 25 25 25
+
+   * - Criterio
+     - 1 Namespace único
+     - 120 Namespaces (1 token c/u)
+     - Arquitectura híbrida (recomendada)
+   * - Aislamiento de Secrets/Red
+     - Nulo (riesgo de seguridad)
+     - Máximo
+     - Alto (por dominio de negocio)
+   * - Gestión de tokens en GitLab
+     - 1 token
+     - 120 tokens (inmanejable)
+     - 1 token a nivel de Grupo GitLab
+   * - Privilegios en OpenShift
+     - Riesgo de colisión de nombres
+     - Muy granular
+     - ClusterRole limitado solo a apps
+   * - Mantenimiento de pipelines
+     - 120 archivos YAML
+     - 120 archivos YAML
+     - 1 plantilla central (``include``)
+
+Con este modelo tienes un solo punto de control para el token de GitLab y la
+lógica de despliegue, pero mantienes aislamiento real en OpenShift para evitar
+que una falla o colisión de nombres afecte a las otras 119 aplicaciones.
+
 Ventajas clave de este flujo
 ============================
 
@@ -254,8 +408,9 @@ Ventajas clave de este flujo
    * - **Trazabilidad**
      - En los logs de auditoría de OpenShift (``oc adm node-logs``), todas
        las acciones quedan registradas exactamente bajo el usuario
-       ``system:serviceaccount:app-produccion:gitlab-deployer``, sabiendo
-       qué proyecto ejecutó cada cambio.
+       ``system:serviceaccount:app-produccion:gitlab-deployer`` (o
+       ``system:serviceaccount:cicd-tools:gitlab-deployer`` en el modelo
+       escalado), sabiendo qué proyecto ejecutó cada cambio.
    * - **Cero mantenimiento en el Bastion**
      - No acumulas carpetas ni manifiestos residuales en el servidor
        Bastion.
@@ -270,4 +425,5 @@ Referencias
 * Documentación oficial de OpenShift: *OpenShift CLI (oc)*.
 * Documentación oficial de Kubernetes: *Service Accounts* y *RBAC
   Authorization*.
-* Documentación oficial de GitLab: *CI/CD Variables*.
+* Documentación oficial de GitLab: *CI/CD Variables* y *Group-level
+  variables*.
