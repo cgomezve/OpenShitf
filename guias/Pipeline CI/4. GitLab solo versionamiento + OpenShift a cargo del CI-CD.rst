@@ -15,7 +15,7 @@ Introducción
 
 Este manual describe cómo configurar GitLab como mero repositorio de código y delegar la totalidad del ciclo CI/CD a OpenShift mediante Pipelines as Code (PaC) (basado en Tekton).
 
-Al operar tu instancia de GitLab local sobre HTTP (sin certificado SSL) en conjunto con OpenShift Local (CRC), esta guía incluye los ajustes específicos de red, permisos de ServiceAccount y parámetros de Buildah necesarios para evitar bloqueos de comunicación o fallos de almacenamiento en contenedores sin privilegios.
+Al operar tu instancia de GitLab local sobre HTTP (sin certificado SSL) en conjunto con OpenShift Local (CRC), esta guía incluye la instalación desde cero del operador de Tekton, los ajustes específicos de red, permisos de ServiceAccount y parámetros de Buildah necesarios para evitar bloqueos de comunicación o fallos de almacenamiento en contenedores sin privilegios.
 
 Paso 0: Habilitar Webhooks locales en GitLab (Requisito crítico)
 
@@ -45,17 +45,59 @@ En la sección Repository, desactiva el interruptor CI/CD.
 
 Haz clic en Save changes.
 
-Paso 2: Verificar Pipelines as Code y permisos en OpenShift
+Paso 2: Instalar y habilitar OpenShift Pipelines (Tekton) y PaC
 
-Verifica que el controlador de PaC esté ejecutándose en tu CRC:
+En instalaciones limpias de OpenShift Local (CRC), el operador de Tekton no viene preinstalado. Sigue estos pasos como administrador del clúster (kubeadmin):
+
+Verificar si el operador ya existe:
 
 .. code-block:: bash
 
 oc get pods -n openshift-pipelines | grep pipelines-as-code
 
-Debe aparecer el pod pipelines-as-code-controller-xxxx en estado Running.
+Si devuelve No resources found in openshift-pipelines namespace, procede con la instalación.
 
-Asegura que el ServiceAccount pipeline de tu proyecto tenga permisos para actualizar despliegues (aplicando el principio de mínimo privilegio, sin cluster-admin):
+Crear la suscripción para instalar el operador oficial de Red Hat:
+
+.. code-block:: bash
+
+cat <<EOF | oc apply -f -
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+name: openshift-pipelines-operator-rh
+namespace: openshift-operators
+spec:
+channel: latest
+installPlanApproval: Automatic
+name: openshift-pipelines-operator-rh
+source: redhat-operators
+sourceNamespace: openshift-marketplace
+EOF
+
+Monitorear el despliegue de los componentes:
+
+.. code-block:: bash
+
+watch "oc get pods -n openshift-pipelines"
+
+Espera unos minutos hasta que los pods principales (tekton-pipelines-controller, tekton-triggers-controller, tekton-events-controller) aparezcan en estado Running. Presiona Ctrl+C para salir del monitoreo.
+
+Asegurar la activación del controlador Pipelines as Code en TektonConfig:
+
+.. code-block:: bash
+
+oc patch tektonconfig config --type=merge -p='{"spec":{"platforms":{"openshift":{"pipelinesAsCode":{"enable":true}}}}}'
+
+Verifica que el pod pipelines-as-code-controller-xxxx levante en estado Running:
+
+.. code-block:: bash
+
+oc get pods -n openshift-pipelines | grep pipelines-as-code
+
+Asignar permisos de edición al ServiceAccount de Tekton en tu proyecto:
+
+Para cumplir con el principio de mínimo privilegio (evitando cluster-admin), otorga el rol edit al ServiceAccount pipeline dentro de tu namespace:
 
 .. code-block:: bash
 
@@ -302,6 +344,10 @@ Admin Area → Settings → Network → Outbound requests
 CI/CD nativo desactivado en el proyecto GitLab
 
 Settings → General → Repository
+
+Operador OpenShift Pipelines y PaC activos
+
+oc get pods -n openshift-pipelines
 
 Rol edit asignado al ServiceAccount pipeline
 
