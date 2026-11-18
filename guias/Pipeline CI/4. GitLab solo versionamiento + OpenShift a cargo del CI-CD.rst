@@ -19,8 +19,9 @@ y delegar la totalidad del ciclo CI/CD a OpenShift mediante Pipelines as
 Code (PaC), basado en Tekton.
 
 Al operar tu instancia de GitLab local sobre HTTP (sin certificado SSL) en
-conjunto con OpenShift Local (CRC), esta guía incluye la instalación desde
-cero del operador de Tekton, los ajustes específicos de red, permisos de
+conjunto con OpenShift Local (CRC), esta guía incluye la habilitación de
+peticiones locales en GitLab, la instalación del operador de Tekton, los
+ajustes específicos de red, la creación de namespaces, permisos de
 ServiceAccount y parámetros de Buildah necesarios para evitar bloqueos de
 comunicación o fallos de almacenamiento en contenedores sin privilegios.
 
@@ -34,8 +35,8 @@ seguridad (SSRF). Debes habilitarlo antes de empezar:
 1. Inicia sesión en tu GitLab con cuenta de Administrador.
 2. Ve a **Admin Area** (icono de llave inglesa) → **Settings** → **Network**.
 3. Expande la sección **Outbound requests**.
-4. Marca la casilla **Allow requests to the local network from web hooks
-   and services**.
+4. Marca la casilla **Allow requests to the local network from webhooks and
+   integrations**.
 5. Haz clic en **Save changes**.
 
 Paso 1: Desactivar el CI/CD nativo de GitLab
@@ -53,8 +54,8 @@ de GitLab en tu proyecto:
 Paso 2: Instalar y habilitar OpenShift Pipelines (Tekton) y PaC
 ===============================================================
 
-En instalaciones limpias de OpenShift Local (CRC), el operador de Tekton
-no viene preinstalado. Sigue estos pasos como administrador del clúster
+En instalaciones limpias de OpenShift Local (CRC), el operador de Tekton no
+viene preinstalado. Sigue estos pasos como administrador del clúster
 (``kubeadmin``):
 
 1. Verificar si el operador ya existe:
@@ -109,17 +110,40 @@ no viene preinstalado. Sigue estos pasos como administrador del clúster
 
       oc get pods -n openshift-pipelines | grep pipelines-as-code
 
-6. Asignar permisos de edición al ServiceAccount de Tekton en tu
-   proyecto. Para cumplir con el principio de mínimo privilegio (evitando
-   ``cluster-admin``), otorga el rol ``edit`` al ServiceAccount
-   ``pipeline`` dentro de tu namespace:
+Paso 3: Crear el Namespace y configurar ServiceAccounts en OpenShift
+====================================================================
+
+1. Crear el proyecto (namespace) en OpenShift:
 
    .. code-block:: bash
 
+      oc new-project my-app-dev
+
+   .. note::
+
+      Si prefieres usar el proyecto ``demo-app`` que ya tienes creado,
+      simplemente reemplaza ``my-app-dev`` por ``demo-app`` en los
+      comandos siguientes.
+
+2. Configurar el ServiceAccount y los permisos. Una vez creado el
+   proyecto, aplica los comandos para configurar el ServiceAccount de
+   despliegue y el de Tekton:
+
+   .. code-block:: bash
+
+      # Cambiar al proyecto
       oc project my-app-dev
+
+      # Crear el ServiceAccount dedicado para GitLab/Deployer
+      oc create sa gitlab-deployer-sa
+
+      # Dar permisos de edición al ServiceAccount deployer
+      oc policy add-role-to-user edit -z gitlab-deployer-sa -n my-app-dev
+
+      # Dar permisos de edición al ServiceAccount predeterminado de Tekton ('pipeline')
       oc policy add-role-to-user edit -z pipeline -n my-app-dev
 
-Paso 3: Obtener la URL del controlador de PaC
+Paso 4: Obtener la URL del controlador de PaC
 =============================================
 
 Obtén la ruta pública de OpenShift hacia donde GitLab enviará los eventos:
@@ -128,17 +152,10 @@ Obtén la ruta pública de OpenShift hacia donde GitLab enviará los eventos:
 
    echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
 
-o este si da error el anterior
-
-.. code-block:: bash
-
-   oc get route -n openshift-pipelines
-
-
 El resultado tendrá un formato similar a:
 ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
 
-Paso 4: Crear un Personal Access Token en GitLab
+Paso 5: Crear un Personal Access Token en GitLab
 ================================================
 
 PaC necesita un token para leer el código fuente y reportar el estado del
@@ -153,7 +170,7 @@ pipeline (checks) de vuelta en tus commits de GitLab:
 
 3. Copia y guarda el token generado.
 
-Paso 5: Configurar el Repository CR y el Webhook
+Paso 6: Configurar el Repository CR y el Webhook
 ================================================
 
 Opción A: Automático mediante la CLI tkn pac (Recomendado)
@@ -171,7 +188,7 @@ Completa los datos solicitados asegurándote de usar ``http://``:
 - **Namespace de OpenShift**: ``my-app-dev``
 - **Project ID de GitLab**: el número identificador visible en la página
   principal de tu proyecto.
-- **URL del controlador PaC**: confirma la detectada en el Paso 3.
+- **URL del controlador PaC**: confirma la detectada en el Paso 4.
 - **Secret del Webhook**: acepta el valor generado por defecto.
 - **GitLab API URL**: ``http://tu-gitlab.local`` (nota: usar HTTP, no
   HTTPS).
@@ -211,12 +228,12 @@ Si prefieres aplicar los manifiestos directamente en OpenShift:
 .. warning::
 
    Si configuras el Webhook manualmente en GitLab (**Settings** →
-   **Webhooks**), pega la URL del Paso 3, ingresa tu ``WEBHOOK_SECRET``,
+   **Webhooks**), pega la URL del Paso 4, ingresa tu ``WEBHOOK_SECRET``,
    selecciona **Push events** y **Merge request events**, y **desmarca**
    la casilla **Enable SSL verification** ya que CRC utiliza certificados
    locales autofirmados.
 
-Paso 6: Crear el archivo .tekton/pipelinerun.yaml blindado
+Paso 7: Crear el archivo .tekton/pipelinerun.yaml blindado
 ==========================================================
 
 Crea la carpeta ``.tekton`` en la raíz de tu repositorio y dentro crea el
@@ -290,6 +307,7 @@ Este manifiesto ya incluye:
                  script: |
                    git clone $(params.repo-url) .
                    git checkout $(params.revision)
+
                - name: build-and-push
                  image: quay.io/buildah/stable:latest
                  workingDir: $(workspaces.source.path)
@@ -299,6 +317,7 @@ Este manifiesto ya incluye:
                    buildah bud --storage-driver=vfs --tls-verify=false -t "$IMAGE_URI" .
                    echo "Subiendo imagen al registry interno de OpenShift..."
                    buildah push --storage-driver=vfs --tls-verify=false "$IMAGE_URI"
+
          - name: deploy-and-verify
            runAfter:
              - clone-build-push
@@ -324,7 +343,7 @@ Este manifiesto ya incluye:
                    fi
                    echo "¡Despliegue verificado exitosamente!"
 
-Paso 7: Ejecutar prueba y verificar logs
+Paso 8: Ejecutar prueba y verificar logs
 =======================================
 
 Sube el archivo ``.tekton/pipelinerun.yaml`` a la rama ``main`` de tu
@@ -349,7 +368,7 @@ Si el pipeline no arranca, revisa los logs del controlador de PaC:
 
    oc logs -n openshift-pipelines -l app=pipelines-as-code-controller --tail=100
 
-Paso 8: Retirar el GitLab Runner antiguo
+Paso 9: Retirar el GitLab Runner antiguo
 ========================================
 
 Una vez verificado que el flujo completo (Push → Webhook → Buildah →
@@ -372,6 +391,8 @@ Checklist de validación final
      - Settings → General → Repository
    * - Operador OpenShift Pipelines y PaC activos
      - ``oc get pods -n openshift-pipelines``
+   * - Namespace y roles creados (my-app-dev)
+     - ``oc project my-app-dev``
    * - Rol edit asignado al ServiceAccount pipeline
      - ``oc policy add-role-to-user edit -z pipeline``
    * - ``git_provider.url`` en Repository CR usa HTTP
