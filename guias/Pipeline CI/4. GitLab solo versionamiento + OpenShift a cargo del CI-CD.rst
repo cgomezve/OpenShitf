@@ -113,8 +113,8 @@ Instalar el binario oficial de ``tkn`` en una ruta del sistema (``/usr/local/bin
 .. note::
    Si el binario ``tkn`` fue descargado por error dentro de un repositorio clonado, moverlo con ``sudo mv tkn /usr/local/bin/`` y eliminar el ``.tar.gz`` antes de ejecutar ``git add``.
 
-5. Preparación del Repositorio y Plantilla ``.tekton/``
-=======================================================
+5. Preparación del Repositorio y Plantilla Inline ``.tekton/``
+==============================================================
 
 5.1. Clonar el Repositorio y Cambiar a la Rama ``develop``
 ----------------------------------------------------------
@@ -126,21 +126,22 @@ Instalar el binario oficial de ``tkn`` en una ruta del sistema (``/usr/local/bin
    git checkout -b develop
    mkdir -p .tekton
 
-5.2. Crear el Manifiesto ``.tekton/pipelinerun.yaml``
------------------------------------------------------
+5.2. Crear el Manifiesto Inline ``.tekton/pipelinerun.yaml``
+------------------------------------------------------------
 
-Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto viaja dentro del código fuente del repositorio y puede entregarse como plantilla estándar a los equipos de desarrollo. Se dispara automáticamente al realizar ``push`` sobre la rama ``develop``:
+Este manifiesto incluye los pasos autocontenidos de **Clone** (con `alpine/git`), **Build** (con `quay.io/buildah/stable` y almacenamiento `vfs` optimizado para CRC) y **Deploy** (con actualización y verificación del Deployment en OpenShift). 
+
+Crear el archivo `.tekton/pipelinerun.yaml` con el siguiente contenido:
 
 .. code-block:: yaml
 
    apiVersion: tekton.dev/v1
    kind: PipelineRun
    metadata:
-     name: my-app-simple-dev-pipeline
+     name: my-app-simple-inline-pipeline
      annotations:
        pipelinesascode.tekton.dev/on-event: "[push]"
        pipelinesascode.tekton.dev/on-target-branch: "[develop]"
-       pipelinesascode.tekton.dev/task: "[git-clone, buildah]"
        pipelinesascode.tekton.dev/max-keep-runs: "3"
    spec:
      params:
@@ -151,7 +152,7 @@ Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto viaja dentro del 
        - name: image_name
          value: "image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:{{ revision }}"
      workspaces:
-       - name: source
+       - name: shared-workspace
          volumeClaimTemplate:
            spec:
              accessModes:
@@ -165,36 +166,54 @@ Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto viaja dentro del 
          - name: revision
          - name: image_name
        workspaces:
-         - name: source
+         - name: shared-workspace
        tasks:
-         - name: fetch-repository
-           taskRef:
-             name: git-clone
-             kind: ClusterTask
+         - name: git-clone
            workspaces:
              - name: output
-               workspace: source
-           params:
-             - name: url
-               value: $(params.repo_url)
-             - name: revision
-               value: $(params.revision)
-             - name: sslVerify
-               value: "false"
+               workspace: shared-workspace
+           taskSpec:
+             workspaces:
+               - name: output
+             steps:
+               - name: clone
+                 image: alpine/git:latest
+                 script: |
+                   #!/usr/bin/env sh
+                   git clone -c http.sslVerify=false --branch $(params.revision) $(params.repo_url) $(workspaces.output.path)
+
          - name: build-image
            runAfter:
-             - fetch-repository
-           taskRef:
-             name: buildah
-             kind: ClusterTask
+             - git-clone
            workspaces:
              - name: source
-               workspace: source
-           params:
-             - name: IMAGE
-               value: $(params.image_name)
-             - name: TLSVERIFY
-               value: "false"
+               workspace: shared-workspace
+           taskSpec:
+             workspaces:
+               - name: source
+             steps:
+               - name: build
+                 image: quay.io/buildah/stable:latest
+                 securityContext:
+                   privileged: true
+                 script: |
+                   #!/usr/bin/env bash
+                   buildah bud --storage-driver=vfs --tls-verify=false \
+                     -t $(params.image_name) $(workspaces.source.path)
+                   buildah push --storage-driver=vfs --tls-verify=false \
+                     $(params.image_name) docker://$(params.image_name)
+
+         - name: deploy-app
+           runAfter:
+             - build-image
+           taskSpec:
+             steps:
+               - name: rollout
+                 image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+                 script: |
+                   #!/usr/bin/env bash
+                   oc set image deployment/my-app-simple *=$(params.image_name) -n my-app-dev
+                   oc rollout status deployment/my-app-simple -n my-app-dev --timeout=120s
 
 5.3. Subir la Plantilla al Repositorio Remoto
 ---------------------------------------------
@@ -202,7 +221,7 @@ Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto viaja dentro del 
 .. code-block:: bash
 
    git add .tekton/pipelinerun.yaml
-   git commit -m "feat: add tekton pipelines-as-code pipelinerun for develop branch"
+   git commit -m "feat: add inline tekton pipelinerun with git, buildah-vfs and oc deploy"
    git push origin develop
 
 6. Vinculación del Repositorio y Webhook
