@@ -1,304 +1,109 @@
-=============================================================================
-Migración CI/CD de GitLab HTTP a OpenShift con Pipelines as Code (Tekton)
-=============================================================================
+================================================================================
+Guia Definitiva: Resolucion de Pipeline Inline con Pipelines as Code (PaC)
+y Git-Clone en OpenShift Local (CRC) y GitLab Local
+================================================================================
 
-:Autor: Carlos Gómez
-:Entorno: Red Hat OpenShift Local (CRC) / GitLab CE Local (HTTP sin SSL)
-:Proyecto: ``my-app-dev``
-:Repositorio: ``http://192.168.123.121/soporte-web/my-app-simple.git``
+Resumen del Problema
+--------------------
+Al implementar un pipeline inline utilizando **Pipelines as Code (PaC)** en OpenShift Local (CRC) conectándose a un servidor **GitLab CE local** (`http://192.168.123.121`), se presentaron múltiples bloqueos consecutivos:
+1. **Errores de sintaxis y compatibilidad:** Uso inicial de versiones obsoletas de la API de Tekton en lugar de `tekton.dev/v1`.
+2. **Falla de autenticación en scripts personalizados (`taskSpec`):** Los intentos de clonar mediante scripts manuales de Bash utilizando Alpine Git fallaban porque el secreto generado automáticamente por PaC (`pac-gitauth-...`) almacena archivos estructurados (`.git-credentials` y `.gitconfig`) y no llaves sueltas de tipo `userid`/`password`.
+3. **Error `CouldntGetTask`:** Al intentar referenciar tareas remotas con `taskRef` sin una definición local ni el resolvedor adecuado, el controlador de PaC no lograba encontrar ni inyectar la tarea.
 
-.. contents:: Contenido
-   :depth: 2
+La Solucion Definitiva y Patron Arquitectonico
+---------------------------------------------
+Para lograr una solucion robusta, limpia y nativa sin recurrir a scripts de Bash frágiles ni lógica manual de credenciales, se aplico el siguiente patron validado:
 
-1. Requisitos Previos en GitLab (Entorno HTTP Local)
-===================================================
+1. **Anotacion de Resolucion Remota:** Se utiliza la anotacion de metadatos `pipelinesascode.tekton.dev/task: "git-clone"` para indicarle al controlador que obtenga y cachee automaticamente la tarea oficial del catalogo.
+2. **Workspace `basic-auth` Nativo:** Se enlaza el secreto gestionado por PaC (`{{ git_auth_secret }}`) a un workspace llamado `basic-auth`. La tarea oficial `git-clone` detecta internamente este workspace y configura de forma transparente las credenciales de Git a partir del archivo `.git-credentials`.
+3. **Estructura YAML Limpia (API v1):** Declaracion de parametros globales, creacion dinamica de volumenes (`PersistentVolumeClaimTemplate`) para el espacio compartido de trabajo y referencia limpia a la tarea oficial.
 
-Debido a que la instancia de GitLab opera en una red privada mediante HTTP sin certificados SSL, es obligatorio autorizar las peticiones salientes hacia redes locales antes de configurar los webhooks.
+---
 
-1.1. Habilitar Webhooks hacia Redes Locales
--------------------------------------------
-
-1. Ingresar a GitLab con una cuenta con privilegios de administrador.
-2. Navegar a **Admin Area > Settings > Network**.
-3. Expandir la sección **Outbound requests**.
-4. Marcar únicamente la casilla:
-   **Allow requests to the local network from webhooks and integrations**
-5. Hacer clic en **Save changes**.
-
-1.2. Generar Personal Access Token (PAT) en GitLab
---------------------------------------------------
-
-1. Ir a **User Settings > Access Tokens** en GitLab.
-2. Seleccionar el tipo de token según la versión de GitLab:
-   
-   * **Opción Recomendada (Legacy Token):** Asignar un nombre (ej. ``tekton-pac-token``) y marcar directamente las tres casillas obligatorias: **``api``**, **``read_repository``** y **``write_repository``**. Hacer clic en *Create personal access token*.
-   * **Opción Fine-grained token:** Seleccionar el repositorio ``soporte-web/my-app-simple`` en el control de acceso y marcar en la lista los permisos correspondientes a lectura/escritura de API y repositorios.
-
-3. Hacer clic en el botón de generación y copiar inmediatamente el código largo generado (formato ``glpat-...``). Este valor se utilizará como credencial de integración en OpenShift (``provider.token``).
-
-2. Preparación del Clúster OpenShift (CRC)
-==========================================
-
-2.1. Verificar el Operador OpenShift Pipelines y PaC
-----------------------------------------------------
-
-Confirmar que el componente Pipelines as Code esté habilitado en la configuración de Tekton y que los pods estén en estado ``Running``:
-
-.. code-block:: bash
-
-   oc patch tektonconfig config --type=merge -p='{"spec":{"platforms":{"openshift":{"pipelinesAsCode":{"enable":true}}}}}'
-   oc get pods -n openshift-pipelines
-
-2.2. Obtener la URL del Webhook del Controlador PaC
----------------------------------------------------
-
-Extraer la ruta pública expuesta por OpenShift para recibir los eventos desde GitLab:
-
-.. code-block:: bash
-
-   oc get route -n openshift-pipelines pipelines-as-code-controller
-
-La URL oficial para el Webhook será de la forma:
-
-.. code-block:: text
-
-   https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing
-
-3. Configuración del Proyecto y Permisos RBAC
-=============================================
-
-3.1. Crear el Namespace de Trabajo
-----------------------------------
-
-.. code-block:: bash
-
-   oc new-project my-app-dev
-   oc project my-app-dev
-
-3.2. Configurar ServiceAccounts y Roles
----------------------------------------
-
-Crear el ``ServiceAccount`` dedicado al despliegue y asignar permisos de edición y lectura tanto al deployer como al ``ServiceAccount`` predeterminado de Tekton (``pipeline``):
-
-.. code-block:: bash
-
-   # Crear el ServiceAccount dedicado para GitLab/Deployer
-   oc create sa gitlab-deployer-sa
-
-   # Dar permisos de edición al ServiceAccount deployer
-   oc policy add-role-to-user edit -z gitlab-deployer-sa -n my-app-dev
-
-   # Dar permisos de edición al ServiceAccount predeterminado de Tekton ('pipeline')
-   oc policy add-role-to-user edit -z pipeline -n my-app-dev
-
-   # Dar permisos de lectura al ServiceAccount predeterminado de Tekton ('pipeline')
-   oc policy add-role-to-user view -z pipeline -n my-app-dev
-
-4. Instalación de CLI Tekton (``tkn``) en Estación Debian
-=========================================================
-
-Instalar el binario oficial de ``tkn`` en una ruta del sistema (``/usr/local/bin/``) fuera de los directorios de repositorios Git para evitar contaminar el código fuente:
-
-.. code-block:: bash
-
-   # Descargar en directorio temporal
-   cd /tmp
-   curl -LO https://github.com/tektoncd/cli/releases/download/v0.38.0/tkn_0.38.0_Linux_x86_64.tar.gz
-
-   # Extraer directamente en /usr/local/bin
-   sudo tar xvzf tkn_0.38.0_Linux_x86_64.tar.gz -C /usr/local/bin/ tkn
-
-   # Limpiar el archivo comprimido
-   rm /tmp/tkn_0.38.0_Linux_x86_64.tar.gz
-
-   # Verificar instalación
-   tkn version
-
-.. note::
-   Si el binario ``tkn`` fue descargado por error dentro de un repositorio clonado, moverlo con ``sudo mv tkn /usr/local/bin/`` y eliminar el ``.tar.gz`` antes de ejecutar ``git add``.
-
-5. Preparación del Repositorio y Plantilla Inline ``.tekton/``
-==============================================================
-
-5.1. Clonar el Repositorio y Cambiar a la Rama ``develop``
-----------------------------------------------------------
-
-.. code-block:: bash
-
-   git clone http://192.168.123.121/soporte-web/my-app-simple.git
-   cd my-app-simple
-   git checkout -b develop
-   mkdir -p .tekton
-
-5.2. Crear el Manifiesto Inline ``.tekton/pipelinerun.yaml``
-------------------------------------------------------------
-
-Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto incluye los pasos autocontenidos de **Clone** (con ``alpine/git``), **Build** (con ``quay.io/buildah/stable`` y almacenamiento ``vfs`` optimizado para CRC) y **Deploy** (con actualización y verificación del Deployment en OpenShift):
+El Manifiesto YAML Final y Funcional (`.tekton/pipelinerun.yaml`)
+-----------------------------------------------------------------
 
 .. code-block:: yaml
 
-   apiVersion: tekton.dev/v1
-   kind: PipelineRun
-   metadata:
-     name: my-app-simple-inline-pipeline
-     annotations:
-       pipelinesascode.tekton.dev/on-event: "[push]"
-       pipelinesascode.tekton.dev/on-target-branch: "[develop]"
-       pipelinesascode.tekton.dev/max-keep-runs: "3"
-   spec:
-     params:
-       - name: repo_url
-         value: "{{ repo_url }}"
-       - name: revision
-         value: "{{ revision }}"
-       - name: image_name
-         value: "image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:{{ revision }}"
-     workspaces:
-       - name: shared-workspace
-         volumeClaimTemplate:
-           spec:
-             accessModes:
-               - ReadWriteOnce
-             resources:
-               requests:
-                 storage: 1Gi
-     pipelineSpec:
-       params:
-         - name: repo_url
-         - name: revision
-         - name: image_name
-       workspaces:
-         - name: shared-workspace
-       tasks:
-         - name: git-clone
-           workspaces:
-             - name: output
-               workspace: shared-workspace
-           taskSpec:
-             workspaces:
-               - name: output
-             steps:
-               - name: clone
-                 image: alpine/git:latest
-                 script: |
-                   #!/usr/bin/env sh
-                   git clone -c http.sslVerify=false --branch $(params.revision) $(params.repo_url) $(workspaces.output.path)
+    apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      name: my-app-simple-inline-pipeline
+      annotations:
+        pipelinesascode.tekton.dev/on-event: "[push]"
+        pipelinesascode.tekton.dev/on-target-branch: "[develop]"
+        pipelinesascode.tekton.dev/max-keep-runs: "3"
+        pipelinesascode.tekton.dev/task: "git-clone"
+    spec:
+      params:
+        - name: repo_url
+          value: "{{ repo_url }}"
+        - name: revision
+          value: "{{ revision }}"
+      workspaces:
+        - name: shared-workspace
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 1Gi
+        - name: basic-auth
+          secret:
+            secretName: "{{ git_auth_secret }}"
+      pipelineSpec:
+        params:
+          - name: repo_url
+          - name: revision
+        workspaces:
+          - name: shared-workspace
+          - name: basic-auth
+        tasks:
+          - name: git-clone
+            taskRef:
+              name: git-clone
+            params:
+              - name: url
+                value: "$(params.repo_url)"
+              - name: revision
+                value: "$(params.revision)"
+              - name: sslVerify
+                value: "false"
+            workspaces:
+              - name: output
+                workspace: shared-workspace
+              - name: basic-auth
+                workspace: basic-auth
 
-         - name: build-image
-           runAfter:
-             - git-clone
-           workspaces:
-             - name: source
-               workspace: shared-workspace
-           taskSpec:
-             workspaces:
-               - name: source
-             steps:
-               - name: build
-                 image: quay.io/buildah/stable:latest
-                 securityContext:
-                   privileged: true
-                 script: |
-                   #!/usr/bin/env bash
-                   buildah bud --storage-driver=vfs --tls-verify=false \
-                     -t $(params.image_name) $(workspaces.source.path)
-                   buildah push --storage-driver=vfs --tls-verify=false \
-                     $(params.image_name) docker://$(params.image_name)
+---
 
-         - name: deploy-app
-           runAfter:
-             - build-image
-           taskSpec:
-             steps:
-               - name: rollout
-                 image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
-                 script: |
-                   #!/usr/bin/env bash
-                   oc set image deployment/my-app-simple *=$(params.image_name) -n my-app-dev
-                   oc rollout status deployment/my-app-simple -n my-app-dev --timeout=120s
-
-5.3. Subir la Plantilla al Repositorio Remoto
+Pasos de Ejecucion y Verificacion en Terminal
 ---------------------------------------------
 
-.. code-block:: bash
+1. **Editar el archivo de configuracion localmente:**
 
-   git add .tekton/pipelinerun.yaml
-   git commit -m "feat: add inline tekton pipelinerun with git, buildah-vfs and oc deploy"
-   git push origin develop
+   .. code-block:: bash
 
-6. Vinculación del Repositorio y Webhook
-========================================
+       cd ~/my-app-simple
+       nano .tekton/pipelinerun.yaml
 
-6.1. Registrar el Recurso ``Repository`` y Secret en OpenShift
---------------------------------------------------------------
+2. **Validar la resolucion del pipeline localmente (Opcional):**
 
-Pipelines as Code requiere un Secret en OpenShift con dos credenciales distintas para autenticar la comunicación bidireccional:
+   .. code-block:: bash
 
-* ``provider.token``: El token generado en GitLab en el **Paso 1.2** (``glpat-...``). Permite a OpenShift conectarse a GitLab para leer el código y reportar el estado de las ejecuciones.
-* ``webhook.secret``: Una contraseña aleatoria **inventada por el administrador** en este momento (ej. ``supersecreto123``). Sirve para firmar y validar que las peticiones Webhook provienen realmente de tu servidor GitLab.
+       tkn pac resolve -f .tekton/pipelinerun.yaml
 
-1. Crear el Secret en el namespace ``my-app-dev`` sustituyendo ``glpat-xxxxxxxxxxxxxxxxxxxx`` por el token real obtenido en el Paso 1.2:
+3. **Hacer commit y push de los cambios hacia la rama `develop` en GitLab:**
 
-.. code-block:: bash
+   .. code-block:: bash
 
-   oc create secret generic gitlab-webhook-secret \
-     --from-literal=provider.token="glpat-xxxxxxxxxxxxxxxxxxxx" \
-     --from-literal=webhook.secret="supersecreto123" \
-     -n my-app-dev
+       git add .tekton/pipelinerun.yaml
+       git commit -m "fix: final native git-clone task integration with basic-auth"
+       git push origin develop
 
-.. important::
-   Conservar el valor definido en ``webhook.secret`` (``supersecreto123``), ya que deberá ingresarse exactamente igual en el campo **Secret token** al configurar el Webhook en GitLab (Paso 6.2).
+4. **Monitorear la ejecucion exitosa en tiempo real en OpenShift:**
 
-2. Crear el archivo ``repository.yaml`` en la raíz de tu proyecto para registrar el repositorio ante Pipelines as Code:
+   .. code-block:: bash
 
-.. code-block:: yaml
-
-   apiVersion: "pipelinesascode.tekton.dev/v1alpha1"
-   kind: Repository
-   metadata:
-     name: my-app-simple
-     namespace: my-app-dev
-   spec:
-     url: "http://192.168.123.121/soporte-web/my-app-simple.git"
-     git_provider:
-       type: gitlab
-       url: "http://192.168.123.121"
-       secret:
-         name: "gitlab-webhook-secret"
-         key: "provider.token"
-       webhook_secret:
-         name: "gitlab-webhook-secret"
-         key: "webhook.secret"
-
-3. Aplicar el recurso en el clúster:
-
-.. code-block:: bash
-
-   oc apply -f repository.yaml
-
-6.2. Configurar el Webhook en el Proyecto de GitLab
----------------------------------------------------
-
-1. En la interfaz de GitLab, navegar al proyecto **soporte-web/my-app-simple > Settings > Webhooks**.
-2. Completar los campos con los siguientes valores:
-
-   * **URL:** ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
-   * **Secret token:** La misma clave definida en ``webhook.secret`` en el Paso 6.1 (ej. ``supersecreto123``).
-   * **Trigger:** Marcar **Push events** y **Merge request events**.
-   * **SSL verification:** Desmarcar **Enable SSL verification** (necesario por los certificados autofirmados del entorno CRC).
-
-3. Hacer clic en **Add webhook** para guardarlo.
-4. Probar la integración haciendo clic en **Test > Push events** y verificar que la respuesta devuelva un código HTTP ``202 Accepted``.
-
-7. Verificación de Ejecución del Pipeline
-=========================================
-
-Comprobar desde la terminal que Pipelines as Code haya recibido el evento y disparado la ejecución:
-
-.. code-block:: bash
-
-   # Listar las ejecuciones del pipeline en el namespace
-   tkn pipelinerun list -n my-app-dev
-
-   # Seguir los logs en tiempo real de la última ejecución
-   tkn pipelinerun logs --last -f -n my-app-dev
+       oc get pipelineruns -n my-app-dev -w
