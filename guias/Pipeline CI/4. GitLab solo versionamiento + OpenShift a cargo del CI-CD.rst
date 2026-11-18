@@ -1,85 +1,137 @@
 ================================================================================
-Guía de Implementación y Troubleshooting: Pipeline CI/CD con OpenShift Local (CRC), Pipelines as Code (PaC) y GitLab CE
+Manual Definitivo y Consolidado: Pipeline CI/CD con OpenShift Local (CRC), Pipelines as Code (PaC) y GitLab Local
 ================================================================================
 
-1. Arquitectura y Entorno de Laboratorio
---------------------------------------------------------------------------------
-El presente documento consolida la configuración, diagnóstico y evolución técnica de un flujo de integración y despliegue continuo (CI/CD) de punta a punta entre **GitLab CE Local** y **Red Hat OpenShift Local (CRC)**.
+:Autor: Carlos
+:Entorno: GitLab CE local (HTTP, sin SSL) + OpenShift Local (CRC) + OpenShift Pipelines (Tekton & PaC)
+:Objetivo: Configurar GitLab exclusivamente como repositorio de código y delegar la totalidad del ciclo CI/CD a OpenShift mediante Pipelines as Code, resolviendo progresivamente permisos, volúmenes y rutas de compilación.
+:Fecha: 2026-11-18
 
-* **Servidor GitLab CE Local:** ``http://192.168.123.121`` (rama objetivo: ``develop``).
-* **Clúster Destino:** OpenShift Local (CRC) — Namespace ``my-app-dev``.
-* **Motor CI/CD:** OpenShift Pipelines (Tekton) con Pipelines as Code (PaC).
-* **Estación de Desarrollo:** Debian Linux (``~/my-app-simple``).
+.. contents:: Contenido
+   :depth: 2
+   :local:
 
-**Estructura del Repositorio (``~/my-app-simple``):**
+Introducción
+============
+
+Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros y la estabilización del pipeline de compilación y despliegue continuo en OpenShift.
+
+Paso 0: Habilitar Webhooks locales en GitLab (Requisito crítico)
+================================================================
+
+Por defecto, GitLab bloquea las peticiones de Webhooks hacia direcciones IP privadas o dominios locales (como `apps-crc.testing`) por políticas de seguridad (SSRF). 
+
+1. Inicia sesión en GitLab con una cuenta de Administrador.
+2. Ve a **Admin Area** (icono de llave inglesa) → **Settings** → **Network**.
+3. Expande la sección **Outbound requests**.
+4. Marca la casilla **Allow requests to the local network from webhooks and integrations**.
+5. Haz clic en **Save changes**.
+
+Paso 1: Desactivar el CI/CD nativo de GitLab
+============================================
+
+Para evitar ejecuciones duplicadas o conflictos de compilación en GitLab:
+
+1. Entra a tu proyecto en GitLab.
+2. En el menú lateral ve a **Settings** → **General**.
+3. Expande **Visibility, project features, permissions**.
+4. En la sección **Repository**, desactiva el interruptor **CI/CD**.
+5. Haz clic en **Save changes**.
+
+Paso 2: Instalar y habilitar OpenShift Pipelines (Tekton) y PaC
+===============================================================
+
+Como administrador del clúster (`kubeadmin`), instala el operador oficial:
+
+1. Crear la suscripción para el operador:
+
+   .. code-block:: bash
+
+      cat <<EOF | oc apply -f -
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: openshift-pipelines-operator-rh
+        namespace: openshift-operators
+      spec:
+        channel: latest
+        installPlanApproval: Automatic
+        name: openshift-pipelines-operator-rh
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+      EOF
+
+2. Asegurar la activación del controlador Pipelines as Code en `TektonConfig`:
+
+   .. code-block:: bash
+
+      oc patch tektonconfig config --type=merge -p='{"spec":{"platforms":{"openshift":{"pipelinesAsCode":{"enable":true}}}}}'
+
+3. Verificar que los componentes levanten correctamente:
+
+   .. code-block:: bash
+
+      oc get pods -n openshift-pipelines
+
+Paso 3: Crear el Namespace y configurar ServiceAccounts y Permisos SCC
+====================================================================
+
+Para permitir que las tareas del pipeline (especialmente Buildah y las operaciones `oc`) se ejecuten con los privilegios adecuados en OpenShift:
+
+1. Crear el proyecto (namespace):
+
+   .. code-block:: bash
+
+      oc new-project my-app-dev
+      oc project my-app-dev
+
+2. Otorgar los privilegios de Security Context Constraints (SCC) `privileged` y `anyuid` al ServiceAccount `pipeline`:
+
+   .. code-block:: bash
+
+      oc adm policy add-scc-to-user privileged system:serviceaccount:my-app-dev:pipeline
+      oc adm policy add-scc-to-user anyuid system:serviceaccount:my-app-dev:pipeline
+      oc policy add-role-to-user edit -z pipeline -n my-app-dev
+
+Paso 4: Obtener la URL del controlador de PaC
+=============================================
+
+Obtén la ruta pública de OpenShift hacia donde GitLab enviará los webhooks:
+
+.. code-block:: bash
+
+   echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
+
+Paso 5: Configurar el Repository CR en OpenShift y Webhook en GitLab
+=====================================================================
+
+Crea el recurso `Repository` apuntando a tu instancia HTTP de GitLab y configura el secreto con el token de acceso personal (`api` y `admin:repo_hook`). 
+
+*(Asegúrate de configurar el Webhook en GitLab apuntando a la ruta del controlador de PaC y desmarcar la verificación SSL si utilizas certificados autofirmados en CRC).*
+
+Paso 6: Estructura del Repositorio Local (`~/my-app-simple`)
+===========================================================
+
+El proyecto mantiene la siguiente distribución de archivos:
 
 .. code-block:: text
 
    my-app-simple/
    ├── .tekton/
-   │   └── pipelinerun.yaml      # Definición del PipelineRun y disparadores PaC
+   │   └── pipelinerun.yaml      # Definición del PipelineRun con PaC
    ├── kubernetes/
-   │   └── deployment.yaml       # Manifiesto de Deployment y Service en my-app-dev
+   │   └── deployment.yaml       # Manifiestos de Deployment y Service para my-app-dev
    ├── contador.txt              # Archivo de control para pruebas de commits
    └── Dockerfile                # Imagen base (nginx:alpine)
 
+Paso 7: Manifiesto Consolidado Final `.tekton/pipelinerun.yaml`
+==============================================================
 
-2. Configuración de Seguridad y Permisos (SCC)
---------------------------------------------------------------------------------
-Para permitir que los contenedores de construcción (``buildah``) y despliegue ejecuten operaciones privilegiadas y montajes dentro del clúster sin ser bloqueados por las políticas de seguridad por defecto de OpenShift, se asignaron los Security Context Constraints (SCC) ``privileged`` y ``anyuid`` al ServiceAccount ``pipeline``:
-
-.. code-block:: bash
-
-   oc adm policy add-scc-to-user privileged -z pipeline -n my-app-dev
-   oc adm policy add-scc-to-user anyuid -z pipeline -n my-app-dev
-
-
-3. Bitácora de Diagnóstico y Troubleshooting Progresivo
---------------------------------------------------------------------------------
-Durante las pruebas de ejecución automatizada mediante webhooks desde GitLab, se identificaron y resolvieron secuencialmente los siguientes bloqueos técnicos:
-
-3.1. Bloqueo de Permisos de Escritura en el Workspace Compartido
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Síntoma:** Falla en la inicialización y clonado al intentar escribir sobre un PersistentVolumeClaim (PVC) sin permisos adecuados o con conflictos de aprovisionamiento dinámico.
-* **Solución:** Se migró el workspace principal ``shared-workspace`` dentro de ``.tekton/pipelinerun.yaml`` hacia un volumen efímero ``emptyDir: {}``, garantizando lectura y escritura inmediata entre todas las tareas del PipelineRun.
-
-3.2. Archivos de Manifiestos sin Seguimiento en Git (Untracked)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Síntoma:** Al ejecutar ``git add .tekton/pipelinerun.yaml contador.txt Dockerfile``, Git indicaba que no había cambios nuevos mientras la carpeta ``kubernetes/`` permanecía sin seguimiento (``untracked``), impidiendo que la fase de despliegue encontrara ``kubernetes/deployment.yaml``.
-* **Solución:** Inclusión completa del directorio de manifiestos en el control de versiones:
-
-.. code-block:: bash
-
-   cd ~/my-app-simple
-   git add .
-   git commit -m "feat: include kubernetes manifests and pipeline configuration for deployment"
-   git push origin develop
-
-3.3. Error de Esquema al Consultar Logs con ``oc logs taskrun/...``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Síntoma:** Al intentar leer registros directamente sobre el recurso Tekton, el cliente CLI arrojaba:
-  ``error: no kind "TaskRun" is registered for version "tekton.dev/v1" in scheme "k8s.io/kubectl/pkg/scheme/scheme.go:28"``
-* **Solución:** Inspeccionar directamente los Pods asociados a cada ejecución en lugar del objeto ``TaskRun``:
-
-.. code-block:: bash
-
-   oc get taskruns -n my-app-dev | grep <id-ejecucion>
-   oc get pods -n my-app-dev
-   oc logs -n my-app-dev <nombre-del-pod> --tail=100
-
-3.4. Fallos en la Tarea ``build-image`` (Buildah) por Ruta del Dockerfile
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* **Historial de Ejecuciones Analizadas:** ``tlvlr``, ``fzrk4``, ``vlm5d``, ``cmd4l`` y ``h6zh4``.
-* **Comportamiento Observado:** La tarea ``git-clone`` finalizaba consistentemente en estado ``Succeeded`` (``True``), pero ``build-image`` fallaba en segundos (``StepFailed``) arrojando en el contenedor ``step-build-and-push``:
-  ``Error: stat /workspace/source/Dockerfile: no such file or directory``
-* **Ajustes Aplicados en Iteraciones:**
-  1. Se configuró ``subdirectory: ""`` en la tarea ``git-clone`` para forzar la descarga del repositorio en la raíz del workspace compartido (``/workspace/source/``) en lugar de crear una subcarpeta con el nombre del proyecto.
-  2. Se definieron explícitamente los parámetros de ``buildah``: ``CONTEXT: "."`` y se probó la transición de ``DOCKERFILE: "./Dockerfile"`` a ``DOCKERFILE: "Dockerfile"``.
-
-
-4. Definición Completa de ``.tekton/pipelinerun.yaml``
---------------------------------------------------------------------------------
-A continuación se presenta el manifiesto consolidado con todas las etapas (``git-clone``, ``build-image`` y ``deploy-app``) y parámetros ajustados hasta la última revisión:
+Este manifiesto integra todas las correcciones necesarias:
+* Uso de workspace efímero (`emptyDir: {}`) para evitar bloqueos de permisos de escritura.
+* Parámetro `subdirectory: ""` en `git-clone` para asegurar que los archivos queden listos en la raíz del workspace compartido (`/workspace/source/`).
+* Configuración estricta de `CONTEXT: "."` y `DOCKERFILE: "Dockerfile"` para que la tarea `buildah` localice el archivo sin errores.
+* Despliegue automático y validación de rollout en el namespace `my-app-dev`.
 
 .. code-block:: yaml
 
@@ -170,29 +222,27 @@ A continuación se presenta el manifiesto consolidado con todas las etapas (``gi
                    oc set image deployment/my-app-simple my-app-simple=image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:$(params.revision) -n my-app-dev
                    oc rollout status deployment/my-app-simple -n my-app-dev --timeout=300s
 
+Paso 8: Operación, Monitoreo y Comandos Útiles
+=============================================
 
-5. Comandos de Operación, Monitoreo y Próximo Paso de Depuración
---------------------------------------------------------------------------------
+* **Sincronización y Envío a GitLab:**
 
-**5.1. Flujo de Actualización desde Debian:**
+  .. code-block:: bash
 
-.. code-block:: bash
+     cd ~/my-app-simple
+     git add .
+     git commit -m "feat: complete pipeline setup and configuration"
+     git push origin develop
 
-   cd ~/my-app-simple
-   git add .
-   git commit -m "fix: update pipeline configuration"
-   git push origin develop
+* **Monitoreo de PipelineRuns en OpenShift:**
 
-**5.2. Monitoreo en Tiempo Real en OpenShift:**
+  .. code-block:: bash
 
-.. code-block:: bash
+     oc get pipelineruns -n my-app-dev -w
 
-   oc get pipelineruns -n my-app-dev -w
+* **Inspección de Pods y Logs ante incidencias:**
 
-**5.3. Paso Pendiente para Verificar la Ruta Exacta en el Workspace:**
-Dado que la última ejecución volvió a fallar en ``build-image``, el siguiente paso de diagnóstico consiste en consultar el log del pod más reciente o añadir un paso temporal de inspección (``ls -la /workspace/source``) antes de ``buildah`` para confirmar exactamente en qué directorio depositó ``git-clone`` los archivos del repositorio:
+  .. code-block:: bash
 
-.. code-block:: bash
-
-   oc get pods -n my-app-dev --sort-by=.metadata.creationTimestamp
-   oc logs -n my-app-dev <ultimo-pod-build-image> --tail=100
+     oc get pods -n my-app-dev
+     oc logs -n my-app-dev <nombre-del-pod> --tail=100
