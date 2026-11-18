@@ -25,17 +25,16 @@ Debido a que la instancia de GitLab opera en una red privada mediante HTTP sin c
    **Allow requests to the local network from webhooks and integrations**
 5. Hacer clic en **Save changes**.
 
-1.2. Generar Personal Access Token (PAT) de Grano Fino
-------------------------------------------------------
+1.2. Generar Personal Access Token (PAT) en GitLab
+--------------------------------------------------
 
 1. Ir a **User Settings > Access Tokens** en GitLab.
-2. Seleccionar **Generate fine-grained token**.
-3. Configurar el token:
+2. Seleccionar el tipo de token según la versión de GitLab:
    
-   * **Token name:** ``tekton-pac-token``
-   * **Repository / Scopes:** Seleccionar el repositorio ``soporte-web/my-app-simple`` y marcar obligatoriamente los alcances: ``api``, ``read_repository`` y ``write_repository``.
+   * **Opción Recomendada (Legacy Token):** Asignar un nombre (ej. ``tekton-pac-token``) y marcar directamente las tres casillas obligatorias: **``api``**, **``read_repository``** y **``write_repository``**. Hacer clic en *Create personal access token*.
+   * **Opción Fine-grained token:** Seleccionar el repositorio ``soporte-web/my-app-simple`` en el control de acceso y marcar en la lista los permisos correspondientes a lectura/escritura de API y repositorios.
 
-4. Hacer clic en **Generate token** y copiar inmediatamente el código largo generado (formato ``glpat-...``). Este valor se utilizará como credencial de integración en OpenShift (``provider.token``).
+3. Hacer clic en el botón de generación y copiar inmediatamente el código largo generado (formato ``glpat-...``). Este valor se utilizará como credencial de integración en OpenShift (``provider.token``).
 
 2. Preparación del Clúster OpenShift (CRC)
 ==========================================
