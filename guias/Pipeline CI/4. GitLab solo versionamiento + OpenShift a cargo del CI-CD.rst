@@ -1,46 +1,85 @@
 ================================================================================
-Documentación de Implementación y Troubleshooting: Pipeline CI/CD con OpenShift Local, Pipelines as Code (PaC) y GitLab
+Guía de Implementación y Troubleshooting: Pipeline CI/CD con OpenShift Local (CRC), Pipelines as Code (PaC) y GitLab CE
 ================================================================================
 
-Resumen del Proyecto
+1. Arquitectura y Entorno de Laboratorio
 --------------------------------------------------------------------------------
-Implementación exitosa de un pipeline de CI/CD de punta a punta utilizando Pipelines as Code (PaC) en OpenShift Local (CRC) y GitLab CE Local, resolviendo progresivamente errores de permisos, volúmenes de trabajo y rutas de compilación para automatizar el despliegue de aplicaciones en el namespace ``my-app-dev``.
+El presente documento consolida la configuración, diagnóstico y evolución técnica de un flujo de integración y despliegue continuo (CI/CD) de punta a punta entre **GitLab CE Local** y **Red Hat OpenShift Local (CRC)**.
+
+* **Servidor GitLab CE Local:** ``http://192.168.123.121`` (rama objetivo: ``develop``).
+* **Clúster Destino:** OpenShift Local (CRC) — Namespace ``my-app-dev``.
+* **Motor CI/CD:** OpenShift Pipelines (Tekton) con Pipelines as Code (PaC).
+* **Estación de Desarrollo:** Debian Linux (``~/my-app-simple``).
+
+**Estructura del Repositorio (``~/my-app-simple``):**
+
+.. code-block:: text
+
+   my-app-simple/
+   ├── .tekton/
+   │   └── pipelinerun.yaml      # Definición del PipelineRun y disparadores PaC
+   ├── kubernetes/
+   │   └── deployment.yaml       # Manifiesto de Deployment y Service en my-app-dev
+   ├── contador.txt              # Archivo de control para pruebas de commits
+   └── Dockerfile                # Imagen base (nginx:alpine)
 
 
-1. Configuración Inicial y Privilegios SCC
+2. Configuración de Seguridad y Permisos (SCC)
 --------------------------------------------------------------------------------
-Para permitir que las tareas del pipeline (especialmente Buildah y las operaciones de despliegue) se ejecuten correctamente sin bloqueos de seguridad en OpenShift, se otorgaron los privilegios de Security Context Constraints (SCC) ``privileged`` y ``anyuid`` al ServiceAccount ``pipeline``:
+Para permitir que los contenedores de construcción (``buildah``) y despliegue ejecuten operaciones privilegiadas y montajes dentro del clúster sin ser bloqueados por las políticas de seguridad por defecto de OpenShift, se asignaron los Security Context Constraints (SCC) ``privileged`` y ``anyuid`` al ServiceAccount ``pipeline``:
 
 .. code-block:: bash
 
-   oc adm policy add-scc-to-user privileged system:serviceaccount:my-app-dev:pipeline
-   oc adm policy add-scc-to-user anyuid system:serviceaccount:my-app-dev:pipeline
+   oc adm policy add-scc-to-user privileged -z pipeline -n my-app-dev
+   oc adm policy add-scc-to-user anyuid -z pipeline -n my-app-dev
 
 
-2. Resolución de Bloqueos de Permisos de Escritura
+3. Bitácora de Diagnóstico y Troubleshooting Progresivo
 --------------------------------------------------------------------------------
-Se solucionaron los errores de permisos de escritura en el espacio de trabajo compartido migrando el workspace principal en el PipelineRun a un volumen temporal ``emptyDir``:
+Durante las pruebas de ejecución automatizada mediante webhooks desde GitLab, se identificaron y resolvieron secuencialmente los siguientes bloqueos técnicos:
 
-.. code-block:: yaml
+3.1. Bloqueo de Permisos de Escritura en el Workspace Compartido
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* **Síntoma:** Falla en la inicialización y clonado al intentar escribir sobre un PersistentVolumeClaim (PVC) sin permisos adecuados o con conflictos de aprovisionamiento dinámico.
+* **Solución:** Se migró el workspace principal ``shared-workspace`` dentro de ``.tekton/pipelinerun.yaml`` hacia un volumen efímero ``emptyDir: {}``, garantizando lectura y escritura inmediata entre todas las tareas del PipelineRun.
 
-   workspaces:
-     - name: shared-workspace
-       emptyDir: {}
+3.2. Archivos de Manifiestos sin Seguimiento en Git (Untracked)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* **Síntoma:** Al ejecutar ``git add .tekton/pipelinerun.yaml contador.txt Dockerfile``, Git indicaba que no había cambios nuevos mientras la carpeta ``kubernetes/`` permanecía sin seguimiento (``untracked``), impidiendo que la fase de despliegue encontrara ``kubernetes/deployment.yaml``.
+* **Solución:** Inclusión completa del directorio de manifiestos en el control de versiones:
+
+.. code-block:: bash
+
+   cd ~/my-app-simple
+   git add .
+   git commit -m "feat: include kubernetes manifests and pipeline configuration for deployment"
+   git push origin develop
+
+3.3. Error de Esquema al Consultar Logs con ``oc logs taskrun/...``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* **Síntoma:** Al intentar leer registros directamente sobre el recurso Tekton, el cliente CLI arrojaba:
+  ``error: no kind "TaskRun" is registered for version "tekton.dev/v1" in scheme "k8s.io/kubectl/pkg/scheme/scheme.go:28"``
+* **Solución:** Inspeccionar directamente los Pods asociados a cada ejecución en lugar del objeto ``TaskRun``:
+
+.. code-block:: bash
+
+   oc get taskruns -n my-app-dev | grep <id-ejecucion>
+   oc get pods -n my-app-dev
+   oc logs -n my-app-dev <nombre-del-pod> --tail=100
+
+3.4. Fallos en la Tarea ``build-image`` (Buildah) por Ruta del Dockerfile
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* **Historial de Ejecuciones Analizadas:** ``tlvlr``, ``fzrk4``, ``vlm5d``, ``cmd4l`` y ``h6zh4``.
+* **Comportamiento Observado:** La tarea ``git-clone`` finalizaba consistentemente en estado ``Succeeded`` (``True``), pero ``build-image`` fallaba en segundos (``StepFailed``) arrojando en el contenedor ``step-build-and-push``:
+  ``Error: stat /workspace/source/Dockerfile: no such file or directory``
+* **Ajustes Aplicados en Iteraciones:**
+  1. Se configuró ``subdirectory: ""`` en la tarea ``git-clone`` para forzar la descarga del repositorio en la raíz del workspace compartido (``/workspace/source/``) en lugar de crear una subcarpeta con el nombre del proyecto.
+  2. Se definieron explícitamente los parámetros de ``buildah``: ``CONTEXT: "."`` y se probó la transición de ``DOCKERFILE: "./Dockerfile"`` a ``DOCKERFILE: "Dockerfile"``.
 
 
-3. Estructura de Archivos del Repositorio
+4. Definición Completa de ``.tekton/pipelinerun.yaml``
 --------------------------------------------------------------------------------
-El repositorio local (``~/my-app-simple``) quedó estructurado de la siguiente forma para soportar tanto la compilación como los manifiestos de Kubernetes:
-
-* ``Dockerfile``: Imagen base (ej. ``nginx:alpine``).
-* ``contador.txt``: Archivo de control y pruebas de cambios.
-* ``kubernetes/deployment.yaml``: Manifiestos de despliegue y servicio para ``my-app-dev``.
-* ``.tekton/pipelinerun.yaml``: Configuración de Pipelines as Code para disparar ejecuciones automáticas en cada ``git push`` hacia la rama ``develop``.
-
-
-4. Evolución y Solución del PipelineRun
---------------------------------------------------------------------------------
-Tras resolver progresivamente los fallos de clonado (configurando ``subdirectory: ""`` para volcar los archivos directamente en la raíz del workspace compartido) y ajustar los parámetros de la tarea ``buildah`` (``CONTEXT: "."`` y ``DOCKERFILE: "Dockerfile"``), la estructura final del archivo `.tekton/pipelinerun.yaml` quedó consolidada de la siguiente manera:
+A continuación se presenta el manifiesto consolidado con todas las etapas (``git-clone``, ``build-image`` y ``deploy-app``) y parámetros ajustados hasta la última revisión:
 
 .. code-block:: yaml
 
@@ -132,27 +171,28 @@ Tras resolver progresivamente los fallos de clonado (configurando ``subdirectory
                    oc rollout status deployment/my-app-simple -n my-app-dev --timeout=300s
 
 
-5. Comandos Clave de Operación y Monitoreo
+5. Comandos de Operación, Monitoreo y Próximo Paso de Depuración
 --------------------------------------------------------------------------------
 
-* **Sincronización y Push a GitLab:**
-  
-  .. code-block:: bash
+**5.1. Flujo de Actualización desde Debian:**
 
-     cd ~/my-app-simple
-     git add .
-     git commit -m "feat: complete CI/CD pipeline configuration"
-     git push origin develop
+.. code-block:: bash
 
-* **Monitoreo de PipelineRuns en OpenShift:**
-  
-  .. code-block:: bash
+   cd ~/my-app-simple
+   git add .
+   git commit -m "fix: update pipeline configuration"
+   git push origin develop
 
-     oc get pipelineruns -n my-app-dev -w
+**5.2. Monitoreo en Tiempo Real en OpenShift:**
 
-* **Inspección de Pods y Logs ante incidencias:**
-  
-  .. code-block:: bash
+.. code-block:: bash
 
-     oc get pods -n my-app-dev
-     oc logs -n my-app-dev <nombre-del-pod-con-error> --tail=100
+   oc get pipelineruns -n my-app-dev -w
+
+**5.3. Paso Pendiente para Verificar la Ruta Exacta en el Workspace:**
+Dado que la última ejecución volvió a fallar en ``build-image``, el siguiente paso de diagnóstico consiste en consultar el log del pod más reciente o añadir un paso temporal de inspección (``ls -la /workspace/source``) antes de ``buildah`` para confirmar exactamente en qué directorio depositó ``git-clone`` los archivos del repositorio:
+
+.. code-block:: bash
+
+   oc get pods -n my-app-dev --sort-by=.metadata.creationTimestamp
+   oc logs -n my-app-dev <ultimo-pod-build-image> --tail=100
