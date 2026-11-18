@@ -35,7 +35,7 @@ Debido a que la instancia de GitLab opera en una red privada mediante HTTP sin c
    * **Token name:** ``tekton-pac-token``
    * **Repository / Scopes:** Seleccionar el repositorio ``soporte-web/my-app-simple`` y marcar obligatoriamente los alcances: ``api``, ``read_repository`` y ``write_repository``.
 
-4. Hacer clic en **Generate token** y copiar inmediatamente el código largo generado (formato ``glpat-...``). Este valor se utilizará como credencial de integración en OpenShift.
+4. Hacer clic en **Generate token** y copiar inmediatamente el código largo generado (formato ``glpat-...``). Este valor se utilizará como credencial de integración en OpenShift (``provider.token``).
 
 2. Preparación del Clúster OpenShift (CRC)
 ==========================================
@@ -233,7 +233,12 @@ Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto incluye los pasos
 6.1. Registrar el Recurso ``Repository`` y Secret en OpenShift
 --------------------------------------------------------------
 
-Crear el Secret combinando el token obtenido de GitLab (reemplazando ``glpat-xxxxxxxxxxxxxxxxxxxx`` con tu PAT real) y una contraseña aleatoria inventada para validar la firma del Webhook (ej. ``supersecreto123``):
+Pipelines as Code requiere un Secret en OpenShift con dos credenciales distintas para autenticar la comunicación bidireccional:
+
+* ``provider.token``: El token generado en GitLab en el **Paso 1.2** (``glpat-...``). Permite a OpenShift conectarse a GitLab para leer el código y reportar el estado de las ejecuciones.
+* ``webhook.secret``: Una contraseña aleatoria **inventada por el administrador** en este momento (ej. ``supersecreto123``). Sirve para firmar y validar que las peticiones Webhook provienen realmente de tu servidor GitLab.
+
+1. Crear el Secret en el namespace ``my-app-dev`` sustituyendo ``glpat-xxxxxxxxxxxxxxxxxxxx`` por el token real obtenido en el Paso 1.2:
 
 .. code-block:: bash
 
@@ -242,7 +247,10 @@ Crear el Secret combinando el token obtenido de GitLab (reemplazando ``glpat-xxx
      --from-literal=webhook.secret="supersecreto123" \
      -n my-app-dev
 
-Crear el archivo ``repository.yaml`` en la raíz de tu proyecto para registrar el repositorio ante Pipelines as Code:
+.. important::
+   Conservar el valor definido en ``webhook.secret`` (``supersecreto123``), ya que deberá ingresarse exactamente igual en el campo **Secret token** al configurar el Webhook en GitLab (Paso 6.2).
+
+2. Crear el archivo ``repository.yaml`` en la raíz de tu proyecto para registrar el repositorio ante Pipelines as Code:
 
 .. code-block:: yaml
 
@@ -263,7 +271,7 @@ Crear el archivo ``repository.yaml`` en la raíz de tu proyecto para registrar e
          name: "gitlab-webhook-secret"
          key: "webhook.secret"
 
-Aplicar el recurso en el clúster:
+3. Aplicar el recurso en el clúster:
 
 .. code-block:: bash
 
@@ -276,7 +284,7 @@ Aplicar el recurso en el clúster:
 2. Completar los campos con los siguientes valores:
 
    * **URL:** ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
-   * **Secret token:** La misma clave definida en el secret (ej. ``supersecreto123``).
+   * **Secret token:** La misma clave definida en ``webhook.secret`` en el Paso 6.1 (ej. ``supersecreto123``).
    * **Trigger:** Marcar **Push events** y **Merge request events**.
    * **SSL verification:** Desmarcar **Enable SSL verification** (necesario por los certificados autofirmados del entorno CRC).
 
