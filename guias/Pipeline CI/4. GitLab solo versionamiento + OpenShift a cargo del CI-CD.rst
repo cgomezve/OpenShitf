@@ -164,6 +164,8 @@ Paso 5: Crear un Personal Access Token en GitLab
 PaC necesita un token para leer el código fuente y reportar el estado del
 pipeline (checks) de vuelta en tus commits de GitLab:
 
+Si deseas que PaC opere en múltiples proyectos, entonces necesitas tener rol Maintainer en cada uno de esos proyectos, o crear el token usando una cuenta con permisos suficientes.
+
 1. En GitLab ve a **User Settings** → **Access Tokens**.
 2. Crea un token con los siguientes scopes:
 
