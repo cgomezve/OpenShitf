@@ -143,6 +143,9 @@ Paso 3: Crear el Namespace y configurar ServiceAccounts en OpenShift
       # Dar permisos de edición al ServiceAccount predeterminado de Tekton ('pipeline')
       oc policy add-role-to-user edit -z pipeline -n my-app-dev
 
+      # Dar permisos de Lectura al ServiceAccount predeterminado de Tekton ('pipeline')
+      oc policy add-role-to-user view -z pipeline -n my-app-dev
+
 Paso 4: Obtener la URL del controlador de PaC
 =============================================
 
