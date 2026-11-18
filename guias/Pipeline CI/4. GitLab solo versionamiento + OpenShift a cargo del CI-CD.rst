@@ -1,109 +1,158 @@
 ================================================================================
-Guia Definitiva: Resolucion de Pipeline Inline con Pipelines as Code (PaC)
-y Git-Clone en OpenShift Local (CRC) y GitLab Local
+Documentación de Implementación y Troubleshooting: Pipeline CI/CD con OpenShift Local, Pipelines as Code (PaC) y GitLab
 ================================================================================
 
-Resumen del Problema
---------------------
-Al implementar un pipeline inline utilizando **Pipelines as Code (PaC)** en OpenShift Local (CRC) conectándose a un servidor **GitLab CE local** (`http://192.168.123.121`), se presentaron múltiples bloqueos consecutivos:
-1. **Errores de sintaxis y compatibilidad:** Uso inicial de versiones obsoletas de la API de Tekton en lugar de `tekton.dev/v1`.
-2. **Falla de autenticación en scripts personalizados (`taskSpec`):** Los intentos de clonar mediante scripts manuales de Bash utilizando Alpine Git fallaban porque el secreto generado automáticamente por PaC (`pac-gitauth-...`) almacena archivos estructurados (`.git-credentials` y `.gitconfig`) y no llaves sueltas de tipo `userid`/`password`.
-3. **Error `CouldntGetTask`:** Al intentar referenciar tareas remotas con `taskRef` sin una definición local ni el resolvedor adecuado, el controlador de PaC no lograba encontrar ni inyectar la tarea.
+Resumen del Proyecto
+--------------------------------------------------------------------------------
+Implementación exitosa de un pipeline de CI/CD de punta a punta utilizando Pipelines as Code (PaC) en OpenShift Local (CRC) y GitLab CE Local, resolviendo progresivamente errores de permisos, volúmenes de trabajo y rutas de compilación para automatizar el despliegue de aplicaciones en el namespace ``my-app-dev``.
 
-La Solucion Definitiva y Patron Arquitectonico
----------------------------------------------
-Para lograr una solucion robusta, limpia y nativa sin recurrir a scripts de Bash frágiles ni lógica manual de credenciales, se aplico el siguiente patron validado:
 
-1. **Anotacion de Resolucion Remota:** Se utiliza la anotacion de metadatos `pipelinesascode.tekton.dev/task: "git-clone"` para indicarle al controlador que obtenga y cachee automaticamente la tarea oficial del catalogo.
-2. **Workspace `basic-auth` Nativo:** Se enlaza el secreto gestionado por PaC (`{{ git_auth_secret }}`) a un workspace llamado `basic-auth`. La tarea oficial `git-clone` detecta internamente este workspace y configura de forma transparente las credenciales de Git a partir del archivo `.git-credentials`.
-3. **Estructura YAML Limpia (API v1):** Declaracion de parametros globales, creacion dinamica de volumenes (`PersistentVolumeClaimTemplate`) para el espacio compartido de trabajo y referencia limpia a la tarea oficial.
+1. Configuración Inicial y Privilegios SCC
+--------------------------------------------------------------------------------
+Para permitir que las tareas del pipeline (especialmente Buildah y las operaciones de despliegue) se ejecuten correctamente sin bloqueos de seguridad en OpenShift, se otorgaron los privilegios de Security Context Constraints (SCC) ``privileged`` y ``anyuid`` al ServiceAccount ``pipeline``:
 
----
+.. code-block:: bash
 
-El Manifiesto YAML Final y Funcional (`.tekton/pipelinerun.yaml`)
------------------------------------------------------------------
+   oc adm policy add-scc-to-user privileged system:serviceaccount:my-app-dev:pipeline
+   oc adm policy add-scc-to-user anyuid system:serviceaccount:my-app-dev:pipeline
+
+
+2. Resolución de Bloqueos de Permisos de Escritura
+--------------------------------------------------------------------------------
+Se solucionaron los errores de permisos de escritura en el espacio de trabajo compartido migrando el workspace principal en el PipelineRun a un volumen temporal ``emptyDir``:
 
 .. code-block:: yaml
 
-    apiVersion: tekton.dev/v1
-    kind: PipelineRun
-    metadata:
-      name: my-app-simple-inline-pipeline
-      annotations:
-        pipelinesascode.tekton.dev/on-event: "[push]"
-        pipelinesascode.tekton.dev/on-target-branch: "[develop]"
-        pipelinesascode.tekton.dev/max-keep-runs: "3"
-        pipelinesascode.tekton.dev/task: "git-clone"
-    spec:
-      params:
-        - name: repo_url
-          value: "{{ repo_url }}"
-        - name: revision
-          value: "{{ revision }}"
-      workspaces:
-        - name: shared-workspace
-          volumeClaimTemplate:
-            spec:
-              accessModes:
-                - ReadWriteOnce
-              resources:
-                requests:
-                  storage: 1Gi
-        - name: basic-auth
-          secret:
-            secretName: "{{ git_auth_secret }}"
-      pipelineSpec:
-        params:
-          - name: repo_url
-          - name: revision
-        workspaces:
-          - name: shared-workspace
-          - name: basic-auth
-        tasks:
-          - name: git-clone
-            taskRef:
-              name: git-clone
-            params:
-              - name: url
-                value: "$(params.repo_url)"
-              - name: revision
-                value: "$(params.revision)"
-              - name: sslVerify
-                value: "false"
-            workspaces:
-              - name: output
-                workspace: shared-workspace
-              - name: basic-auth
-                workspace: basic-auth
+   workspaces:
+     - name: shared-workspace
+       emptyDir: {}
 
----
 
-Pasos de Ejecucion y Verificacion en Terminal
----------------------------------------------
+3. Estructura de Archivos del Repositorio
+--------------------------------------------------------------------------------
+El repositorio local (``~/my-app-simple``) quedó estructurado de la siguiente forma para soportar tanto la compilación como los manifiestos de Kubernetes:
 
-1. **Editar el archivo de configuracion localmente:**
+* ``Dockerfile``: Imagen base (ej. ``nginx:alpine``).
+* ``contador.txt``: Archivo de control y pruebas de cambios.
+* ``kubernetes/deployment.yaml``: Manifiestos de despliegue y servicio para ``my-app-dev``.
+* ``.tekton/pipelinerun.yaml``: Configuración de Pipelines as Code para disparar ejecuciones automáticas en cada ``git push`` hacia la rama ``develop``.
 
-   .. code-block:: bash
 
-       cd ~/my-app-simple
-       nano .tekton/pipelinerun.yaml
+4. Evolución y Solución del PipelineRun
+--------------------------------------------------------------------------------
+Tras resolver progresivamente los fallos de clonado (configurando ``subdirectory: ""`` para volcar los archivos directamente en la raíz del workspace compartido) y ajustar los parámetros de la tarea ``buildah`` (``CONTEXT: "."`` y ``DOCKERFILE: "Dockerfile"``), la estructura final del archivo `.tekton/pipelinerun.yaml` quedó consolidada de la siguiente manera:
 
-2. **Validar la resolucion del pipeline localmente (Opcional):**
+.. code-block:: yaml
 
-   .. code-block:: bash
+   apiVersion: tekton.dev/v1
+   kind: PipelineRun
+   metadata:
+     name: my-app-simple-full-pipeline
+     annotations:
+       pipelinesascode.tekton.dev/on-event: "[push]"
+       pipelinesascode.tekton.dev/on-target-branch: "[develop]"
+       pipelinesascode.tekton.dev/max-keep-runs: "3"
+       pipelinesascode.tekton.dev/task: "[git-clone, buildah]"
+   spec:
+     params:
+       - name: repo_url
+         value: "{{ repo_url }}"
+       - name: revision
+         value: "{{ revision }}"
+     workspaces:
+       - name: shared-workspace
+         emptyDir: {}
+       - name: basic-auth
+         secret:
+           secretName: "{{ git_auth_secret }}"
+     pipelineSpec:
+       params:
+         - name: repo_url
+         - name: revision
+       workspaces:
+         - name: shared-workspace
+         - name: basic-auth
+       tasks:
+         - name: git-clone
+           taskRef:
+             name: git-clone
+           params:
+             - name: url
+               value: "$(params.repo_url)"
+             - name: revision
+               value: "$(params.revision)"
+             - name: sslVerify
+               value: "false"
+             - name: subdirectory
+               value: ""
+           workspaces:
+             - name: output
+               workspace: shared-workspace
+             - name: basic-auth
+               workspace: basic-auth
 
-       tkn pac resolve -f .tekton/pipelinerun.yaml
+         - name: build-image
+           taskRef:
+             name: buildah
+           runAfter:
+             - git-clone
+           params:
+             - name: IMAGE
+               value: "image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:$(params.revision)"
+             - name: STORAGE_DRIVER
+               value: "vfs"
+             - name: TLSVERIFY
+               value: "false"
+             - name: CONTEXT
+               value: "."
+             - name: DOCKERFILE
+               value: "Dockerfile"
+           workspaces:
+             - name: source
+               workspace: shared-workspace
 
-3. **Hacer commit y push de los cambios hacia la rama `develop` en GitLab:**
+         - name: deploy-app
+           runAfter:
+             - build-image
+           workspaces:
+             - name: source
+               workspace: shared-workspace
+           taskSpec:
+             workspaces:
+               - name: source
+             steps:
+               - name: apply-and-verify
+                 image: quay.io/openshift/origin-cli:latest
+                 script: |
+                   #!/usr/bin/env bash
+                   set -e
+                   cd $(workspaces.source.path)
+                   oc apply -f kubernetes/deployment.yaml -n my-app-dev
+                   oc set image deployment/my-app-simple my-app-simple=image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:$(params.revision) -n my-app-dev
+                   oc rollout status deployment/my-app-simple -n my-app-dev --timeout=300s
 
-   .. code-block:: bash
 
-       git add .tekton/pipelinerun.yaml
-       git commit -m "fix: final native git-clone task integration with basic-auth"
-       git push origin develop
+5. Comandos Clave de Operación y Monitoreo
+--------------------------------------------------------------------------------
 
-4. **Monitorear la ejecucion exitosa en tiempo real en OpenShift:**
+* **Sincronización y Push a GitLab:**
+  
+  .. code-block:: bash
 
-   .. code-block:: bash
+     cd ~/my-app-simple
+     git add .
+     git commit -m "feat: complete CI/CD pipeline configuration"
+     git push origin develop
 
-       oc get pipelineruns -n my-app-dev -w
+* **Monitoreo de PipelineRuns en OpenShift:**
+  
+  .. code-block:: bash
+
+     oc get pipelineruns -n my-app-dev -w
+
+* **Inspección de Pods y Logs ante incidencias:**
+  
+  .. code-block:: bash
+
+     oc get pods -n my-app-dev
+     oc logs -n my-app-dev <nombre-del-pod-con-error> --tail=100
