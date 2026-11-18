@@ -128,6 +128,13 @@ Obtén la ruta pública de OpenShift hacia donde GitLab enviará los eventos:
 
    echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
 
+o este si da error el anterior
+
+.. code-block:: bash
+
+   oc get route -n openshift-pipelines
+
+
 El resultado tendrá un formato similar a:
 ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
 
