@@ -29,8 +29,14 @@ Debido a que la instancia de GitLab opera en una red privada mediante HTTP sin c
 ----------------------------------------
 
 1. Ir a **User Settings > Access Tokens**.
-2. Crear un token con los alcances (scopes): ``api``, ``read_repository`` y ``write_repository``.
-3. Guardar el valor del token generado para registrarlo posteriormente en OpenShift.
+2. Seleccionar **Generate fine-grained token**.
+3. Configurar el token:
+
+   * **Token name:** ``tekton-pac-token``
+   * **Expiration date:** Definir según política local.
+   * **Repository / Scopes:** Seleccionar el repositorio ``soporte-web/my-app-simple`` y marcar los alcances ``api``, ``read_repository`` y ``write_repository``.
+
+4. Hacer clic en **Generate token** y copiar el valor generado (formato ``glpat-...``), ya que no volverá a mostrarse.
 
 2. Preparación del Clúster OpenShift (CRC)
 ==========================================
@@ -129,9 +135,9 @@ Instalar el binario oficial de ``tkn`` en una ruta del sistema (``/usr/local/bin
 5.2. Crear el Manifiesto Inline ``.tekton/pipelinerun.yaml``
 ------------------------------------------------------------
 
-Este manifiesto incluye los pasos autocontenidos de **Clone** (con `alpine/git`), **Build** (con `quay.io/buildah/stable` y almacenamiento `vfs` optimizado para CRC) y **Deploy** (con actualización y verificación del Deployment en OpenShift). 
+Este manifiesto incluye los pasos autocontenidos de **Clone** (con ``alpine/git``), **Build** (con ``quay.io/buildah/stable`` y almacenamiento ``vfs`` optimizado para CRC) y **Deploy** (con actualización y verificación del Deployment en OpenShift).
 
-Crear el archivo `.tekton/pipelinerun.yaml` con el siguiente contenido:
+Crear el archivo ``.tekton/pipelinerun.yaml`` con el siguiente contenido:
 
 .. code-block:: yaml
 
@@ -230,16 +236,16 @@ Crear el archivo `.tekton/pipelinerun.yaml` con el siguiente contenido:
 6.1. Registrar el Recurso ``Repository`` en OpenShift
 -----------------------------------------------------
 
-Crear el Secret con el Personal Access Token de GitLab y una clave aleatoria para validar la firma del Webhook:
+Crear el Secret combinando el token obtenido de GitLab (``glpat-...``) y una contraseña aleatoria inventada para validar la firma del Webhook:
 
 .. code-block:: bash
 
    oc create secret generic gitlab-webhook-secret \
-     --from-literal=provider.token="<TU_GITLAB_PAT>" \
-     --from-literal=webhook.secret="<CLAVE_SECRETA_WEBHOOK>" \
+     --from-literal=provider.token="glpat-xxxxxxxxxxxxxxxxxxxx" \
+     --from-literal=webhook.secret="supersecreto123" \
      -n my-app-dev
 
-Crear y aplicar el manifiesto ``Repository`` apuntando explícitamente a la URL ``http://``:
+Crear el archivo ``repository.yaml`` apuntando explícitamente a la URL ``http://``:
 
 .. code-block:: yaml
 
@@ -273,7 +279,7 @@ Aplicar el recurso en el clúster:
 2. Completar los campos:
 
    * **URL:** ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
-   * **Secret token:** El mismo valor definido en ``webhook.secret``.
+   * **Secret token:** El mismo valor definido en ``webhook.secret`` (ej. ``supersecreto123``).
    * **Trigger:** Marcar **Push events** (opcionalmente filtrar por la rama ``develop``) y **Merge request events**.
    * **SSL verification:** Desmarcar **Enable SSL verification** (debido a los certificados autofirmados de CRC).
 
