@@ -25,18 +25,17 @@ Debido a que la instancia de GitLab opera en una red privada mediante HTTP sin c
    **Allow requests to the local network from webhooks and integrations**
 5. Hacer clic en **Save changes**.
 
-1.2. Generar Personal Access Token (PAT)
-----------------------------------------
+1.2. Generar Personal Access Token (PAT) de Grano Fino
+------------------------------------------------------
 
-1. Ir a **User Settings > Access Tokens**.
+1. Ir a **User Settings > Access Tokens** en GitLab.
 2. Seleccionar **Generate fine-grained token**.
 3. Configurar el token:
-
+   
    * **Token name:** ``tekton-pac-token``
-   * **Expiration date:** Definir según política local.
-   * **Repository / Scopes:** Seleccionar el repositorio ``soporte-web/my-app-simple`` y marcar los alcances ``api``, ``read_repository`` y ``write_repository``.
+   * **Repository / Scopes:** Seleccionar el repositorio ``soporte-web/my-app-simple`` y marcar obligatoriamente los alcances: ``api``, ``read_repository`` y ``write_repository``.
 
-4. Hacer clic en **Generate token** y copiar el valor generado (formato ``glpat-...``), ya que no volverá a mostrarse.
+4. Hacer clic en **Generate token** y copiar inmediatamente el código largo generado (formato ``glpat-...``). Este valor se utilizará como credencial de integración en OpenShift.
 
 2. Preparación del Clúster OpenShift (CRC)
 ==========================================
@@ -60,7 +59,7 @@ Extraer la ruta pública expuesta por OpenShift para recibir los eventos desde G
 
    oc get route -n openshift-pipelines pipelines-as-code-controller
 
-La URL oficial para el Webhook será:
+La URL oficial para el Webhook será de la forma:
 
 .. code-block:: text
 
@@ -135,9 +134,7 @@ Instalar el binario oficial de ``tkn`` en una ruta del sistema (``/usr/local/bin
 5.2. Crear el Manifiesto Inline ``.tekton/pipelinerun.yaml``
 ------------------------------------------------------------
 
-Este manifiesto incluye los pasos autocontenidos de **Clone** (con ``alpine/git``), **Build** (con ``quay.io/buildah/stable`` y almacenamiento ``vfs`` optimizado para CRC) y **Deploy** (con actualización y verificación del Deployment en OpenShift).
-
-Crear el archivo ``.tekton/pipelinerun.yaml`` con el siguiente contenido:
+Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto incluye los pasos autocontenidos de **Clone** (con ``alpine/git``), **Build** (con ``quay.io/buildah/stable`` y almacenamiento ``vfs`` optimizado para CRC) y **Deploy** (con actualización y verificación del Deployment en OpenShift):
 
 .. code-block:: yaml
 
@@ -233,10 +230,10 @@ Crear el archivo ``.tekton/pipelinerun.yaml`` con el siguiente contenido:
 6. Vinculación del Repositorio y Webhook
 ========================================
 
-6.1. Registrar el Recurso ``Repository`` en OpenShift
------------------------------------------------------
+6.1. Registrar el Recurso ``Repository`` y Secret en OpenShift
+--------------------------------------------------------------
 
-Crear el Secret combinando el token obtenido de GitLab (``glpat-...``) y una contraseña aleatoria inventada para validar la firma del Webhook:
+Crear el Secret combinando el token obtenido de GitLab (reemplazando ``glpat-xxxxxxxxxxxxxxxxxxxx`` con tu PAT real) y una contraseña aleatoria inventada para validar la firma del Webhook (ej. ``supersecreto123``):
 
 .. code-block:: bash
 
@@ -245,7 +242,7 @@ Crear el Secret combinando el token obtenido de GitLab (``glpat-...``) y una con
      --from-literal=webhook.secret="supersecreto123" \
      -n my-app-dev
 
-Crear el archivo ``repository.yaml`` apuntando explícitamente a la URL ``http://``:
+Crear el archivo ``repository.yaml`` en la raíz de tu proyecto para registrar el repositorio ante Pipelines as Code:
 
 .. code-block:: yaml
 
@@ -275,24 +272,25 @@ Aplicar el recurso en el clúster:
 6.2. Configurar el Webhook en el Proyecto de GitLab
 ---------------------------------------------------
 
-1. En GitLab, ir al proyecto **soporte-web/my-app-simple > Settings > Webhooks**.
-2. Completar los campos:
+1. En la interfaz de GitLab, navegar al proyecto **soporte-web/my-app-simple > Settings > Webhooks**.
+2. Completar los campos con los siguientes valores:
 
    * **URL:** ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
-   * **Secret token:** El mismo valor definido en ``webhook.secret`` (ej. ``supersecreto123``).
-   * **Trigger:** Marcar **Push events** (opcionalmente filtrar por la rama ``develop``) y **Merge request events**.
-   * **SSL verification:** Desmarcar **Enable SSL verification** (debido a los certificados autofirmados de CRC).
+   * **Secret token:** La misma clave definida en el secret (ej. ``supersecreto123``).
+   * **Trigger:** Marcar **Push events** y **Merge request events**.
+   * **SSL verification:** Desmarcar **Enable SSL verification** (necesario por los certificados autofirmados del entorno CRC).
 
-3. Guardar con **Add webhook** y ejecutar **Test > Push events** para validar respuesta HTTP ``202 Accepted``.
+3. Hacer clic en **Add webhook** para guardarlo.
+4. Probar la integración haciendo clic en **Test > Push events** y verificar que la respuesta devuelva un código HTTP ``202 Accepted``.
 
 7. Verificación de Ejecución del Pipeline
 =========================================
 
-Comprobar desde la terminal que Pipelines as Code haya recibido el evento y disparado el ``PipelineRun``:
+Comprobar desde la terminal que Pipelines as Code haya recibido el evento y disparado la ejecución:
 
 .. code-block:: bash
 
-   # Listar ejecuciones en el namespace
+   # Listar las ejecuciones del pipeline en el namespace
    tkn pipelinerun list -n my-app-dev
 
    # Seguir los logs en tiempo real de la última ejecución
