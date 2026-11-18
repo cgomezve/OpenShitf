@@ -93,13 +93,25 @@ Crear el ``ServiceAccount`` dedicado al despliegue y asignar permisos de edició
 4. Instalación de CLI Tekton (``tkn``) en Estación Debian
 =========================================================
 
-Si la herramienta ``tkn`` no está disponible en la estación de trabajo, instalar el binario oficial:
+Instalar el binario oficial de ``tkn`` en una ruta del sistema (``/usr/local/bin/``) fuera de los directorios de repositorios Git para evitar contaminar el código fuente:
 
 .. code-block:: bash
 
+   # Descargar en directorio temporal
+   cd /tmp
    curl -LO https://github.com/tektoncd/cli/releases/download/v0.38.0/tkn_0.38.0_Linux_x86_64.tar.gz
+
+   # Extraer directamente en /usr/local/bin
    sudo tar xvzf tkn_0.38.0_Linux_x86_64.tar.gz -C /usr/local/bin/ tkn
+
+   # Limpiar el archivo comprimido
+   rm /tmp/tkn_0.38.0_Linux_x86_64.tar.gz
+
+   # Verificar instalación
    tkn version
+
+.. note::
+   Si el binario ``tkn`` fue descargado por error dentro de un repositorio clonado, moverlo con ``sudo mv tkn /usr/local/bin/`` y eliminar el ``.tar.gz`` antes de ejecutar ``git add``.
 
 5. Preparación del Repositorio y Plantilla ``.tekton/``
 =======================================================
@@ -117,7 +129,7 @@ Si la herramienta ``tkn`` no está disponible en la estación de trabajo, instal
 5.2. Crear el Manifiesto ``.tekton/pipelinerun.yaml``
 -----------------------------------------------------
 
-Este archivo viaja dentro del código fuente del repositorio y puede entregarse como plantilla estándar a los equipos de desarrollo. Se dispara automáticamente al realizar ``push`` sobre la rama ``develop``:
+Crear el archivo ``.tekton/pipelinerun.yaml``. Este manifiesto viaja dentro del código fuente del repositorio y puede entregarse como plantilla estándar a los equipos de desarrollo. Se dispara automáticamente al realizar ``push`` sobre la rama ``develop``:
 
 .. code-block:: yaml
 
@@ -184,13 +196,22 @@ Este archivo viaja dentro del código fuente del repositorio y puede entregarse 
              - name: TLSVERIFY
                value: "false"
 
+5.3. Subir la Plantilla al Repositorio Remoto
+---------------------------------------------
+
+.. code-block:: bash
+
+   git add .tekton/pipelinerun.yaml
+   git commit -m "feat: add tekton pipelines-as-code pipelinerun for develop branch"
+   git push origin develop
+
 6. Vinculación del Repositorio y Webhook
 ========================================
 
 6.1. Registrar el Recurso ``Repository`` en OpenShift
 -----------------------------------------------------
 
-Crear el Secret con el token de GitLab y un secreto aleatorio para validar el Webhook:
+Crear el Secret con el Personal Access Token de GitLab y una clave aleatoria para validar la firma del Webhook:
 
 .. code-block:: bash
 
@@ -199,7 +220,7 @@ Crear el Secret con el token de GitLab y un secreto aleatorio para validar el We
      --from-literal=webhook.secret="<CLAVE_SECRETA_WEBHOOK>" \
      -n my-app-dev
 
-Aplicar el manifiesto ``Repository`` apuntando explícitamente a la URL ``http://``:
+Crear y aplicar el manifiesto ``Repository`` apuntando explícitamente a la URL ``http://``:
 
 .. code-block:: yaml
 
@@ -220,6 +241,12 @@ Aplicar el manifiesto ``Repository`` apuntando explícitamente a la URL ``http:/
          name: "gitlab-webhook-secret"
          key: "webhook.secret"
 
+Aplicar el recurso en el clúster:
+
+.. code-block:: bash
+
+   oc apply -f repository.yaml
+
 6.2. Configurar el Webhook en el Proyecto de GitLab
 ---------------------------------------------------
 
@@ -229,4 +256,19 @@ Aplicar el manifiesto ``Repository`` apuntando explícitamente a la URL ``http:/
    * **URL:** ``https://pipelines-as-code-controller-openshift-pipelines.apps-crc.testing``
    * **Secret token:** El mismo valor definido en ``webhook.secret``.
    * **Trigger:** Marcar **Push events** (opcionalmente filtrar por la rama ``develop``) y **Merge request events**.
-   * **SSL verification:** Desmarcar **Enable SSL verification** (debido a los certificados autofirmados de
+   * **SSL verification:** Desmarcar **Enable SSL verification** (debido a los certificados autofirmados de CRC).
+
+3. Guardar con **Add webhook** y ejecutar **Test > Push events** para validar respuesta HTTP ``202 Accepted``.
+
+7. Verificación de Ejecución del Pipeline
+=========================================
+
+Comprobar desde la terminal que Pipelines as Code haya recibido el evento y disparado el ``PipelineRun``:
+
+.. code-block:: bash
+
+   # Listar ejecuciones en el namespace
+   tkn pipelinerun list -n my-app-dev
+
+   # Seguir los logs en tiempo real de la última ejecución
+   tkn pipelinerun logs --last -f -n my-app-dev
