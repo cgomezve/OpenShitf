@@ -15,15 +15,15 @@ Pipelines as Code (PaC) y GitLab Local
 Introducción
 ============
 
-Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en `/tmp`) y la estabilización completa del pipeline de compilación con Kaniko y despliegue continuo en OpenShift.
+Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en ``/tmp``) y la estabilización completa del pipeline de compilación con Kaniko y despliegue continuo en OpenShift.
 
 Paso 0: Habilitar Webhooks locales en GitLab (Requisito crítico)
 ================================================================
 
-Por defecto, GitLab bloquea las peticiones de Webhooks hacia direcciones IP privadas o dominios locales (como `apps-crc.testing`) por políticas de seguridad (SSRF).
+Por defecto, GitLab bloquea las peticiones de Webhooks hacia direcciones IP privadas o dominios locales (como ``apps-crc.testing``) por políticas de seguridad (SSRF).
 
 1. Inicia sesión en GitLab con una cuenta de Administrador.
-2. Ve a **Admin Area** (icono de llave inglesa) → **Settings** → **Network**.
+2. Ve a **Admin Area** (icono de llave inglesa) -> **Settings** -> **Network**.
 3. Expande la sección **Outbound requests**.
 4. Marca la casilla **Allow requests to the local network from webhooks and integrations**.
 5. Haz clic en **Save changes**.
@@ -34,7 +34,7 @@ Paso 1: Desactivar el CI/CD nativo de GitLab
 Para evitar ejecuciones duplicadas o conflictos de compilación en el servidor de GitLab:
 
 1. Entra a tu proyecto en GitLab.
-2. En el menú lateral ve a **Settings** → **General**.
+2. En el menú lateral ve a **Settings** -> **General**.
 3. Expande **Visibility, project features, permissions**.
 4. En la sección **Repository**, desactiva el interruptor **CI/CD**.
 5. Haz clic en **Save changes**.
@@ -42,7 +42,7 @@ Para evitar ejecuciones duplicadas o conflictos de compilación en el servidor d
 Paso 2: Instalar y habilitar OpenShift Pipelines (Tekton) y PaC
 ===============================================================
 
-Como administrador del clúster (`kubeadmin`), instala el operador oficial y habilita Pipelines as Code:
+Como administrador del clúster (``kubeadmin``), instala el operador oficial y habilita Pipelines as Code:
 
 1. Crear la suscripción para el operador:
 
@@ -62,7 +62,7 @@ Como administrador del clúster (`kubeadmin`), instala el operador oficial y hab
         sourceNamespace: openshift-marketplace
       EOF
 
-2. Asegurar la activación del controlador Pipelines as Code en `TektonConfig`:
+2. Asegurar la activación del controlador Pipelines as Code en ``TektonConfig``:
 
    .. code-block:: bash
 
@@ -77,7 +77,7 @@ Como administrador del clúster (`kubeadmin`), instala el operador oficial y hab
 Paso 3: Crear el Namespace y configurar ServiceAccounts y Permisos SCC
 ====================================================================
 
-Para permitir que las tareas del pipeline y las operaciones `oc` se ejecuten con los privilegios adecuados en OpenShift:
+Para permitir que las tareas del pipeline y las operaciones ``oc`` se ejecuten con los privilegios adecuados en OpenShift:
 
 1. Crear el proyecto (namespace):
 
@@ -86,7 +86,7 @@ Para permitir que las tareas del pipeline y las operaciones `oc` se ejecuten con
       oc new-project my-app-dev
       oc project my-app-dev
 
-2. Otorgar los privilegios de Security Context Constraints (SCC) `privileged` y `anyuid` al ServiceAccount `pipeline`:
+2. Otorgar los privilegios de Security Context Constraints (SCC) ``privileged`` y ``anyuid`` al ServiceAccount ``pipeline``:
 
    .. code-block:: bash
 
@@ -101,17 +101,17 @@ Obtén la ruta pública de OpenShift hacia donde GitLab enviará los webhooks:
 
 .. code-block:: bash
 
-      echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
+   echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
 
 Paso 5: Configurar el Repository CR en OpenShift y Webhook en GitLab
 =====================================================================
 
-Crea el recurso `Repository` apuntando a tu instancia HTTP de GitLab y configura el secreto con el token de acceso personal (`api` y `admin:repo_hook`). 
+Crea el recurso ``Repository`` apuntando a tu instancia HTTP de GitLab y configura el secreto con el token de acceso personal (``api`` y ``admin:repo_hook``).
 
 *(Asegúrate de configurar el Webhook en GitLab apuntando a la ruta del controlador de PaC y desmarcar la verificación SSL si utilizas certificados autofirmados en CRC).*
 
-Paso 6: Estructura del Repositorio Local (`~/my-app-simple`)
-===========================================================
+Paso 6: Estructura del Repositorio Local (``~/my-app-simple``)
+===============================================================
 
 El proyecto mantiene la siguiente distribución de archivos optimizada para entornos rootless:
 
@@ -130,10 +130,10 @@ El proyecto mantiene la siguiente distribución de archivos optimizada para ento
 Paso 7: Archivos de Configuración del Contenedor y Despliegue
 =============================================================
 
-A. Configuración de Nginx (`nginx.conf`)
-----------------------------------------
+A. Configuración de Nginx (``nginx.conf``)
+------------------------------------------
 
-Para cumplir estrictamente con las políticas de seguridad de OpenShift (prohibido escribir en `/var/cache/nginx` y prohibido usar puertos menores a 1024 como el 80), reubicamos los temporales a `/tmp` y escuchamos en el puerto **8080**:
+Para cumplir estrictamente con las políticas de seguridad de OpenShift (prohibido escribir en ``/var/cache/nginx`` y prohibido usar puertos menores a 1024 como el 80), reubicamos los temporales a ``/tmp`` y escuchamos en el puerto **8080**:
 
 .. code-block:: nginx
 
@@ -168,8 +168,8 @@ Para cumplir estrictamente con las políticas de seguridad de OpenShift (prohibi
        }
    }
 
-B. Receta de Contenedor (`Dockerfile`)
---------------------------------------
+B. Receta de Contenedor (``Dockerfile``)
+----------------------------------------
 
 .. code-block:: dockerfile
 
@@ -180,8 +180,8 @@ B. Receta de Contenedor (`Dockerfile`)
 
    EXPOSE 8080
 
-C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
----------------------------------------------------------------
+C. Manifiesto de Despliegue y Red (``kubernetes/deployment.yaml``)
+-----------------------------------------------------------------
 
 .. code-block:: yaml
 
@@ -192,29 +192,29 @@ C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
      namespace: my-app-dev
      labels:
        app: my-app-simple
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: my-app-simple
-  template:
-    metadata:
-      labels:
-        app: my-app-simple
-    spec:
-      containers:
-        - name: my-app-simple
-          image: image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:latest
-          ports:
-            - containerPort: 8080
-          resources:
-            limits:
-              cpu: "200m"
-              memory: "256Mi"
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
----
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: my-app-simple
+     template:
+       metadata:
+         labels:
+           app: my-app-simple
+       spec:
+         containers:
+           - name: my-app-simple
+             image: image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:latest
+             ports:
+               - containerPort: 8080
+             resources:
+               limits:
+                 cpu: "200m"
+                 memory: "256Mi"
+               requests:
+                 cpu: "50m"
+                 memory: "64Mi"
+   ---
    apiVersion: v1
    kind: Service
    metadata:
@@ -222,22 +222,23 @@ spec:
      namespace: my-app-dev
      labels:
        app: my-app-simple
-spec:
-  ports:
-    - port: 80
-      targetPort: 8080
-      protocol: TCP
-  selector:
-    app: my-app-simple
-  type: ClusterIP
+   spec:
+     ports:
+       - port: 80
+         targetPort: 8080
+         protocol: TCP
+     selector:
+       app: my-app-simple
+     type: ClusterIP
 
-Paso 8: Manifiesto Consolidado Final `.tekton/pipeline.yaml`
-============================================================
+Paso 8: Manifiesto Consolidado Final ``.tekton/pipeline.yaml``
+==============================================================
 
 Este manifiesto integra todas las tareas validadas:
-- Uso de workspace efímero (`emptyDir: {}`).
-- Clonado con `git-clone` y compilación eficiente mediante Kaniko (`gcr.io/kaniko-project/executor`).
-- Despliegue automático y validación de rollout en el namespace `my-app-dev`.
+
+* Uso de workspace efímero (``emptyDir: {}``).
+* Clonado con ``git-clone`` y compilación eficiente mediante Kaniko (``gcr.io/kaniko-project/executor``).
+* Despliegue automático y validación de rollout en el namespace ``my-app-dev``.
 
 .. code-block:: yaml
 
@@ -331,7 +332,7 @@ Este manifiesto integra todas las tareas validadas:
 Paso 9: Operación, Monitoreo y Comandos Útiles
 =============================================
 
-- **Sincronización y Envío a GitLab:**
+* **Sincronización y Envío a GitLab:**
 
   .. code-block:: bash
 
@@ -340,25 +341,25 @@ Paso 9: Operación, Monitoreo y Comandos Útiles
      git commit -m "feat: complete pipeline setup and configuration"
      git push origin develop
 
-- **Monitoreo de PipelineRuns en OpenShift:**
+* **Monitoreo de PipelineRuns en OpenShift:**
 
   .. code-block:: bash
 
      oc get pipelineruns -n my-app-dev --sort-by='{.metadata.creationTimestamp}' -w
 
-- **Seguimiento del ciclo de vida de los Pods en vivo:**
+* **Seguimiento del ciclo de vida de los Pods en vivo:**
 
   .. code-block:: bash
 
      oc get pods -n my-app-dev --sort-by='.metadata.creationTimestamp' -w
 
-- **Inspección de logs ante incidencias:**
+* **Inspección de logs ante incidencias:**
 
   .. code-block:: bash
 
      oc logs -n my-app-dev <nombre-del-pod> --tail=100
 
-- **Cancelar un PipelineRun colgado o atascado:**
+* **Cancelar un PipelineRun colgado o atascado:**
 
   .. code-block:: bash
 
