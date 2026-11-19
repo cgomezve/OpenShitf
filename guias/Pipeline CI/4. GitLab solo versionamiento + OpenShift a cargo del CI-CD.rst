@@ -15,7 +15,7 @@ Pipelines as Code (PaC) y GitLab Local
 Introducción
 ============
 
-Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en ``/tmp``) y la estabilización completa del pipeline de compilación con Kaniko y despliegue continuo en OpenShift.
+Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en ``/tmp``) y la estabilización completa del pipeline de compilación y despliegue continuo en OpenShift.
 
 Paso 0: Habilitar Webhooks locales en GitLab (Requisito crítico)
 ================================================================
@@ -108,7 +108,7 @@ Paso 5: Configurar el Repository CR en OpenShift y Webhook en GitLab
 
 Crea el recurso ``Repository`` apuntando a tu instancia HTTP de GitLab y configura el secreto con el token de acceso personal (``api`` y ``admin:repo_hook``).
 
-*(Asegúrate de configurar el Webhook en GitLab apuntando a la ruta del controlador de PaC y desmarcar la verificación SSL si utilizas certificados autofirmados en CRC).*
+*Asegúrate de configurar el Webhook en GitLab apuntando a la ruta del controlador de PaC y desmarcar la verificación SSL si utilizas certificados autofirmados en CRC.*
 
 Paso 6: Estructura del Repositorio Local (``~/my-app-simple``)
 ===============================================================
@@ -122,7 +122,7 @@ El proyecto mantiene la siguiente distribución de archivos optimizada para ento
    │   └── pipeline.yaml         # Definición del PipelineRun con PaC
    ├── kubernetes/
    │   └── deployment.yaml       # Manifiestos de Deployment y Service para my-app-dev
-   ├── Dockerfile                # Receta de Kaniko para Nginx rootless (/tmp y puerto 8080)
+   ├── Dockerfile                # Receta para Nginx rootless (/tmp y puerto 8080)
    ├── nginx.conf                # Configuración optimizada de Nginx para OpenShift
    ├── index.html                # Página web de prueba
    └── contador.txt              # Archivo de control para pruebas de commits
@@ -237,7 +237,7 @@ Paso 8: Manifiesto Consolidado Final ``.tekton/pipeline.yaml``
 Este manifiesto integra todas las tareas validadas:
 
 * Uso de workspace efímero (``emptyDir: {}``).
-* Clonado con ``git-clone`` y compilación eficiente mediante Kaniko (``gcr.io/kaniko-project/executor``).
+* Clonado con ``git-clone`` y compilación con ``buildah``.
 * Despliegue automático y validación de rollout en el namespace ``my-app-dev``.
 
 .. code-block:: yaml
