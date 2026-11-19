@@ -15,7 +15,7 @@ Pipelines as Code (PaC) y GitLab Local
 Introducción
 ============
 
-Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en ``/tmp``) y la estabilización completa del pipeline de compilación y despliegue continuo en OpenShift.
+Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en ``/tmp``) y la estabilización completa del pipeline de compilación con ``buildah`` y despliegue continuo en OpenShift.
 
 Paso 0: Habilitar Webhooks locales en GitLab (Requisito crítico)
 ================================================================
