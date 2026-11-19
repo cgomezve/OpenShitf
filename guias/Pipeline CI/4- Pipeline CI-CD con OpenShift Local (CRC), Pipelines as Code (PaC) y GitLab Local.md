@@ -210,23 +210,56 @@ COPY index.html /usr/share/nginx/html/index.html
 EXPOSE 8080
 ```
 
-C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\--
+### C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
 
-``` yaml
-```
-
-apiVersion: apps/v1 kind: Deployment metadata: name: my-app-simple
-namespace: my-app-dev labels: app: my-app-simple spec: replicas: 1
-selector: matchLabels: app: my-app-simple template: metadata: labels:
-app: my-app-simple spec: containers: - name: my-app-simple image:
-image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:latest
-ports: - containerPort: 8080 resources: limits: cpu: \"200m\" memory:
-\"256Mi\" requests: cpu: \"50m\" memory: \"64Mi\" \-\--apiVersion: v1
-kind: Service metadata: name: my-app-simple-svc namespace: my-app-dev
-labels: app: my-app-simple spec: type: NodePort selector: app:
-my-app-simple ports: - name: http protocol: TCP port: 80 targetPort:
-8080 nodePort: 30012
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-simple
+  namespace: my-app-dev
+  labels:
+    app: my-app-simple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app-simple
+  template:
+    metadata:
+      labels:
+        app: my-app-simple
+    spec:
+      containers:
+        - name: my-app-simple
+          image: image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-simple-svc
+  namespace: my-app-dev
+  labels:
+    app: my-app-simple
+spec:
+  type: NodePort
+  selector:
+    app: my-app-simple
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8080
+      nodePort: 30012
 
 # Paso 8: Manifiesto Consolidado Final `.tekton/pipeline.yaml`
 
