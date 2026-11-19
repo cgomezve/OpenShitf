@@ -1,10 +1,11 @@
 ================================================================================
-Manual Definitivo y Consolidado: Pipeline CI/CD con OpenShift Local (CRC), Pipelines as Code (PaC) y GitLab Local
+Manual Definitivo y Consolidado: Pipeline CI/CD con OpenShift Local (CRC),
+Pipelines as Code (PaC) y GitLab Local
 ================================================================================
 
-:Autor: Carlos
+:Autor: Carlos Gómez
 :Entorno: GitLab CE local (HTTP, sin SSL) + OpenShift Local (CRC) + OpenShift Pipelines (Tekton & PaC)
-:Objetivo: Configurar GitLab exclusivamente como repositorio de código y delegar la totalidad del ciclo CI/CD a OpenShift mediante Pipelines as Code, resolviendo progresivamente permisos, volúmenes y rutas de compilación.
+:Objetivo: Configurar GitLab exclusivamente como repositorio de código y delegar la totalidad del ciclo CI/CD a OpenShift mediante Pipelines as Code, resolviendo progresivamente los permisos de seguridad (SCC), volúmenes efímeros, restricciones de usuario no-privilegiado (rootless) en Nginx y el enrutamiento de puertos.
 :Fecha: 2026-11-18
 
 .. contents:: Contenido
@@ -14,12 +15,12 @@ Manual Definitivo y Consolidado: Pipeline CI/CD con OpenShift Local (CRC), Pipel
 Introducción
 ============
 
-Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros y la estabilización del pipeline de compilación y despliegue continuo en OpenShift.
+Este manual recopila de principio a fin todo el diseño arquitectónico, los requisitos previos de red, la configuración del operador de Pipelines as Code (PaC), la resolución de bloqueos de seguridad (SCC), los ajustes de almacenamiento en volúmenes efímeros, la adaptación de Nginx para contenedores rootless (puerto 8080 y rutas temporales en `/tmp`) y la estabilización completa del pipeline de compilación con Kaniko y despliegue continuo en OpenShift.
 
 Paso 0: Habilitar Webhooks locales en GitLab (Requisito crítico)
 ================================================================
 
-Por defecto, GitLab bloquea las peticiones de Webhooks hacia direcciones IP privadas o dominios locales (como `apps-crc.testing`) por políticas de seguridad (SSRF). 
+Por defecto, GitLab bloquea las peticiones de Webhooks hacia direcciones IP privadas o dominios locales (como `apps-crc.testing`) por políticas de seguridad (SSRF).
 
 1. Inicia sesión en GitLab con una cuenta de Administrador.
 2. Ve a **Admin Area** (icono de llave inglesa) → **Settings** → **Network**.
@@ -30,7 +31,7 @@ Por defecto, GitLab bloquea las peticiones de Webhooks hacia direcciones IP priv
 Paso 1: Desactivar el CI/CD nativo de GitLab
 ============================================
 
-Para evitar ejecuciones duplicadas o conflictos de compilación en GitLab:
+Para evitar ejecuciones duplicadas o conflictos de compilación en el servidor de GitLab:
 
 1. Entra a tu proyecto en GitLab.
 2. En el menú lateral ve a **Settings** → **General**.
@@ -41,7 +42,7 @@ Para evitar ejecuciones duplicadas o conflictos de compilación en GitLab:
 Paso 2: Instalar y habilitar OpenShift Pipelines (Tekton) y PaC
 ===============================================================
 
-Como administrador del clúster (`kubeadmin`), instala el operador oficial:
+Como administrador del clúster (`kubeadmin`), instala el operador oficial y habilita Pipelines as Code:
 
 1. Crear la suscripción para el operador:
 
@@ -76,7 +77,7 @@ Como administrador del clúster (`kubeadmin`), instala el operador oficial:
 Paso 3: Crear el Namespace y configurar ServiceAccounts y Permisos SCC
 ====================================================================
 
-Para permitir que las tareas del pipeline (especialmente Buildah y las operaciones `oc`) se ejecuten con los privilegios adecuados en OpenShift:
+Para permitir que las tareas del pipeline y las operaciones `oc` se ejecuten con los privilegios adecuados en OpenShift:
 
 1. Crear el proyecto (namespace):
 
@@ -100,7 +101,7 @@ Obtén la ruta pública de OpenShift hacia donde GitLab enviará los webhooks:
 
 .. code-block:: bash
 
-   echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
+      echo https://$(oc get route -n openshift-pipelines pipelines-as-code-controller -o jsonpath='{.spec.host}')
 
 Paso 5: Configurar el Repository CR en OpenShift y Webhook en GitLab
 =====================================================================
@@ -112,26 +113,131 @@ Crea el recurso `Repository` apuntando a tu instancia HTTP de GitLab y configura
 Paso 6: Estructura del Repositorio Local (`~/my-app-simple`)
 ===========================================================
 
-El proyecto mantiene la siguiente distribución de archivos:
+El proyecto mantiene la siguiente distribución de archivos optimizada para entornos rootless:
 
 .. code-block:: text
 
    my-app-simple/
    ├── .tekton/
-   │   └── pipelinerun.yaml      # Definición del PipelineRun con PaC
+   │   └── pipeline.yaml         # Definición del PipelineRun con PaC
    ├── kubernetes/
    │   └── deployment.yaml       # Manifiestos de Deployment y Service para my-app-dev
-   ├── contador.txt              # Archivo de control para pruebas de commits
-   └── Dockerfile                # Imagen base (nginx:alpine)
+   ├── Dockerfile                # Receta de Kaniko para Nginx rootless (/tmp y puerto 8080)
+   ├── nginx.conf                # Configuración optimizada de Nginx para OpenShift
+   ├── index.html                # Página web de prueba
+   └── contador.txt              # Archivo de control para pruebas de commits
 
-Paso 7: Manifiesto Consolidado Final `.tekton/pipelinerun.yaml`
-==============================================================
+Paso 7: Archivos de Configuración del Contenedor y Despliegue
+=============================================================
 
-Este manifiesto integra todas las correcciones necesarias:
-* Uso de workspace efímero (`emptyDir: {}`) para evitar bloqueos de permisos de escritura.
-* Parámetro `subdirectory: ""` en `git-clone` para asegurar que los archivos queden listos en la raíz del workspace compartido (`/workspace/source/`).
-* Configuración estricta de `CONTEXT: "."` y `DOCKERFILE: "Dockerfile"` para que la tarea `buildah` localice el archivo sin errores.
-* Despliegue automático y validación de rollout en el namespace `my-app-dev`.
+A. Configuración de Nginx (`nginx.conf`)
+----------------------------------------
+
+Para cumplir estrictamente con las políticas de seguridad de OpenShift (prohibido escribir en `/var/cache/nginx` y prohibido usar puertos menores a 1024 como el 80), reubicamos los temporales a `/tmp` y escuchamos en el puerto **8080**:
+
+.. code-block:: nginx
+
+   pid /tmp/nginx.pid;
+   worker_processes auto;
+
+   events {
+       worker_connections 1024;
+   }
+
+   http {
+       include /etc/nginx/mime.types;
+       default_type application/octet-stream;
+
+       client_body_temp_path /tmp/client_temp;
+       proxy_temp_path /tmp/proxy_temp;
+       fastcgi_temp_path /tmp/fastcgi_temp;
+       uwsgi_temp_path /tmp/uwsgi_temp;
+       scgi_temp_path /tmp/scgi_temp;
+
+       sendfile on;
+       keepalive_timeout 65;
+
+       server {
+           listen 8080;
+           server_name localhost;
+
+           location / {
+               root /usr/share/nginx/html;
+               index index.html index.htm;
+           }
+       }
+   }
+
+B. Receta de Contenedor (`Dockerfile`)
+--------------------------------------
+
+.. code-block:: dockerfile
+
+   FROM nginx:alpine
+
+   COPY nginx.conf /etc/nginx/nginx.conf
+   COPY index.html /usr/share/nginx/html/index.html
+
+   EXPOSE 8080
+
+C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
+---------------------------------------------------------------
+
+.. code-block:: yaml
+
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: my-app-simple
+     namespace: my-app-dev
+     labels:
+       app: my-app-simple
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app-simple
+  template:
+    metadata:
+      labels:
+        app: my-app-simple
+    spec:
+      containers:
+        - name: my-app-simple
+          image: image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+---
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: my-app-simple-svc
+     namespace: my-app-dev
+     labels:
+       app: my-app-simple
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: my-app-simple
+  type: ClusterIP
+
+Paso 8: Manifiesto Consolidado Final `.tekton/pipeline.yaml`
+============================================================
+
+Este manifiesto integra todas las tareas validadas:
+- Uso de workspace efímero (`emptyDir: {}`).
+- Clonado con `git-clone` y compilación eficiente mediante Kaniko (`gcr.io/kaniko-project/executor`).
+- Despliegue automático y validación de rollout en el namespace `my-app-dev`.
 
 .. code-block:: yaml
 
@@ -222,10 +328,10 @@ Este manifiesto integra todas las correcciones necesarias:
                    oc set image deployment/my-app-simple my-app-simple=image-registry.openshift-image-registry.svc:5000/my-app-dev/my-app-simple:$(params.revision) -n my-app-dev
                    oc rollout status deployment/my-app-simple -n my-app-dev --timeout=300s
 
-Paso 8: Operación, Monitoreo y Comandos Útiles
+Paso 9: Operación, Monitoreo y Comandos Útiles
 =============================================
 
-* **Sincronización y Envío a GitLab:**
+- **Sincronización y Envío a GitLab:**
 
   .. code-block:: bash
 
@@ -234,15 +340,26 @@ Paso 8: Operación, Monitoreo y Comandos Útiles
      git commit -m "feat: complete pipeline setup and configuration"
      git push origin develop
 
-* **Monitoreo de PipelineRuns en OpenShift:**
+- **Monitoreo de PipelineRuns en OpenShift:**
 
   .. code-block:: bash
 
-     oc get pipelineruns -n my-app-dev -w
+     oc get pipelineruns -n my-app-dev --sort-by='{.metadata.creationTimestamp}' -w
 
-* **Inspección de Pods y Logs ante incidencias:**
+- **Seguimiento del ciclo de vida de los Pods en vivo:**
 
   .. code-block:: bash
 
-     oc get pods -n my-app-dev
+     oc get pods -n my-app-dev --sort-by='.metadata.creationTimestamp' -w
+
+- **Inspección de logs ante incidencias:**
+
+  .. code-block:: bash
+
      oc logs -n my-app-dev <nombre-del-pod> --tail=100
+
+- **Cancelar un PipelineRun colgado o atascado:**
+
+  .. code-block:: bash
+
+     oc patch pipelinerun <nombre-del-pipelinerun> -n my-app-dev --type=merge -p '{"spec":{"status":"Cancelled"}}'
