@@ -210,7 +210,7 @@ COPY index.html /usr/share/nginx/html/index.html
 EXPOSE 8080
 ```
 
-### C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
+## C. Manifiesto de Despliegue y Red (`kubernetes/deployment.yaml`)
 
 ```yaml
 apiVersion: apps/v1
@@ -261,7 +261,7 @@ spec:
       targetPort: 8080
       nodePort: 30012
 
-# Paso 8: Manifiesto Consolidado Final `.tekton/pipeline.yaml`
+## Paso 8: Manifiesto Consolidado Final `.tekton/pipeline.yaml`
 
 Este manifiesto integra todas las tareas validadas:
 
