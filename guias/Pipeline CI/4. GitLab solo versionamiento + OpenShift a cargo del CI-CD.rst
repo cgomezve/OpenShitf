@@ -3,10 +3,16 @@ Manual Definitivo y Consolidado: Pipeline CI/CD con OpenShift Local (CRC),
 Pipelines as Code (PaC) y GitLab Local
 ================================================================================
 
-:Aautor: Carlos Gómez
-:Entorno: GitLab CE local (HTTP, sin SSL) + OpenShift Local (CRC) + OpenShift Pipelines (Tekton & PaC)
-:Objetivo: Configurar GitLab exclusivamente como repositorio de código y delegar la totalidad del ciclo CI/CD a OpenShift mediante Pipelines as Code, resolviendo progresivamente los permisos de seguridad (SCC), volúmenes efímeros, restricciones de usuario no-privilegiado (rootless) en Nginx y el enrutamiento de puertos.
-:Fecha: 2026-11-18
+.. Comentario de cabecera:
+   Autor:    Carlos Gómez
+   Entorno:  GitLab CE local (HTTP, sin SSL) + OpenShift Local (CRC)
+             + OpenShift Pipelines (Tekton & PaC)
+   Objetivo: Configurar GitLab exclusivamente como repositorio de código y
+             delegar la totalidad del ciclo CI/CD a OpenShift mediante
+             Pipelines as Code, resolviendo progresivamente los permisos de
+             seguridad (SCC), volúmenes efímeros, restricciones de usuario
+             no-privilegiado (rootless) en Nginx y el enrutamiento de puertos.
+   Fecha:    2026-11-18
 
 .. contents:: Contenido
    :depth: 2
